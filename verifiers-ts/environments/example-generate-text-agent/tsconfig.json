@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "composite": false,
+    "baseUrl": ".",
+    "paths": {
+      "verifiers-ts": ["../../src/index.ts"]
+    }
+  },
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../../" }
+  ]
+}
+

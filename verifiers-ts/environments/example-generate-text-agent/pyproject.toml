@@ -1,0 +1,19 @@
+[project]
+name = "example-generate-text-agent"
+version = "0.1.0"
+description = "Example environment using createRLEnvironment with generateText agent"
+readme = "README.md"
+tags = ["typescript", "generate-text", "ai-sdk", "tools", "example"]
+dependencies = [
+    "verifiers>=0.1.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = ["example_generate_text_agent.py"]
+
+
+

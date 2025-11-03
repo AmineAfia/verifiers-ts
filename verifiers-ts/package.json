@@ -1,0 +1,37 @@
+{
+  "name": "verifiers-ts",
+  "version": "0.1.0",
+  "description": "TypeScript implementation of the verifiers framework for RL environments",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\""
+  },
+  "keywords": [
+    "rl",
+    "reinforcement-learning",
+    "evaluation",
+    "ai-sdk",
+    "verifiers"
+  ],
+  "author": "Amine Afia",
+  "license": "MIT",
+  "dependencies": {
+    "@ai-sdk/openai": "^2.0.59",
+    "ai": "^5.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@typescript-eslint/eslint-plugin": "^6.19.0",
+    "@typescript-eslint/parser": "^6.19.0",
+    "eslint": "^8.56.0",
+    "prettier": "^3.2.4",
+    "typescript": "^5.3.3"
+  }
+}

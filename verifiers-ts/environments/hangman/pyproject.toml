@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hangman"
+version = "0.1.0"
+description = "Hangman game environment for verifiers-ts"
+readme = "README.md"
+tags = ["typescript", "hangman", "game", "multi-turn", "interactive"]
+requires-python = ">=3.12"
+dependencies = [
+    "verifiers>=0.1.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[tool.hatch.build]
+include = ["hangman.py"]
+
