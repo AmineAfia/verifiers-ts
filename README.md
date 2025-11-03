@@ -1,5 +1,7 @@
 # verifiers-ts
 
+> ⚠️ this lib is still WIP, look at the [hangmnan code](https://github.com/AmineAfia/verifiers-ts/tree/main/verifiers-ts/environments/hangman) for a full example and open issues for any questions
+
 TypeScript implementation of the verifiers framework for building RL environments and evaluations with AI SDK integration.
 
 ## Overview
