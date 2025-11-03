@@ -43,8 +43,8 @@ uv run vf-tui outputs
 
 > ℹ️ The project uses `uv` for dependency management and expects that you build artifacts separately (see `AGENTS.md` for full setup guidance).
 
-This is the result of the run:
-![Hangman evaluation screenshot: A Hangman run with LLM agent making letter guesses via the guess_letter tool. Shows agent turns, game state updates, and reward feedback.](./@CleanShot%202025-11-03%20at%2019.07.24.png)
+<img width="1412" height="1360" alt="image" src="https://github.com/user-attachments/assets/0ae2fd3c-4a95-4ce8-be59-5879c5ff75c2" />
+
 
 
 ### Core snippets
