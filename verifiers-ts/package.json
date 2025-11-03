@@ -1,16 +1,28 @@
 {
   "name": "verifiers-ts",
-  "version": "0.1.0",
+  "version": "0.0.1-alpha.0",
   "description": "TypeScript implementation of the verifiers framework for RL environments",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
+"files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+],
+"exports": {
+    ".": {
+        "import": "./dist/index.js",
+        "types": "./dist/index.d.ts"
+    }
+},
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "lint": "eslint src --ext .ts",
-    "format": "prettier --write \"src/**/*.ts\""
+    "format": "prettier --write \"src/**/*.ts\"",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "rl",
@@ -21,6 +33,10 @@
   ],
   "author": "Amine Afia",
   "license": "MIT",
+"repository": {
+    "type": "git",
+    "url": "https://github.com/AmineAfia/verifiers-ts.git"
+},
   "dependencies": {
     "@ai-sdk/openai": "^2.0.59",
     "ai": "^5.0.0",
