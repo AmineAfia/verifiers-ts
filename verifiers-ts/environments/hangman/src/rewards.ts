@@ -1,5 +1,5 @@
 import type { Messages, State } from "verifiers-ts";
-import { DEFAULT_WRONG_GUESSES, type HangmanGameState } from "./game.js";
+import { DEFAULT_WRONG_GUESSES, type HangmanGameState } from "./game";
 
 export const CORRECTNESS_REWARD_WEIGHT = 1.0;
 export const EFFICIENCY_REWARD_WEIGHT = 0.5;
@@ -32,4 +32,3 @@ export function efficiencyReward(
   const efficiency = 1.0 - gameState.wrongGuesses / maxWrongGuesses;
   return Math.max(0.0, efficiency);
 }
-

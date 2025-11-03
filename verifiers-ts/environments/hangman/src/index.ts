@@ -4,23 +4,20 @@
  */
 
 import type { Environment, SandboxConfig } from "verifiers-ts";
+import { createToolGameEnvironment, type RewardFunc } from "verifiers-ts";
 import {
-  createToolGameEnvironment,
-  type RewardFunc,
-} from "verifiers-ts";
+	DEFAULT_WRONG_GUESSES,
+	HangmanGame,
+	createHangmanDataset,
+	generateWordList,
+	type HangmanGameState,
+} from "./game";
 import {
-  DEFAULT_WRONG_GUESSES,
-  HangmanGame,
-  createHangmanDataset,
-  generateWordList,
-  type HangmanGameState,
-} from "./game.js";
-import {
-  correctnessReward,
-  efficiencyReward,
-  FORMAT_REWARD_WEIGHT,
-  CORRECTNESS_REWARD_WEIGHT,
-  EFFICIENCY_REWARD_WEIGHT,
+	correctnessReward,
+	efficiencyReward,
+	FORMAT_REWARD_WEIGHT,
+	CORRECTNESS_REWARD_WEIGHT,
+	EFFICIENCY_REWARD_WEIGHT,
 } from "./rewards.js";
 import { prepareHangmanAgent, type HangmanAgentConfig } from "./agent.js";
 
@@ -35,71 +32,68 @@ Rules:
 You must call the guess_letter tool each turn with a single letter.`;
 
 export type HangmanEnvironmentOptions = {
-  agent?: HangmanAgentConfig;
-  numTrainExamples?: number;
-  numEvalExamples?: number;
-  maxWrongGuesses?: number;
-  maxTurns?: number;
-  wordList?: string[];
-  sandbox?: {
-    enabled: boolean;
-    config?: SandboxConfig;
-  };
+	agent?: HangmanAgentConfig;
+	numTrainExamples?: number;
+	numEvalExamples?: number;
+	maxWrongGuesses?: number;
+	maxTurns?: number;
+	wordList?: string[];
+	sandbox?: {
+		enabled: boolean;
+		config?: SandboxConfig;
+	};
 };
 
 const REWARD_WEIGHTS = [
-  CORRECTNESS_REWARD_WEIGHT,
-  EFFICIENCY_REWARD_WEIGHT,
-  FORMAT_REWARD_WEIGHT,
+	CORRECTNESS_REWARD_WEIGHT,
+	EFFICIENCY_REWARD_WEIGHT,
+	FORMAT_REWARD_WEIGHT,
 ];
 
 export async function createHangmanEnvironment(
-  options: HangmanEnvironmentOptions = {}
+	options: HangmanEnvironmentOptions = {},
 ): Promise<Environment> {
-  const sandboxEnabled = options.sandbox?.enabled ?? true;
-  const numTrainExamples = options.numTrainExamples ?? 100;
-  const numEvalExamples = options.numEvalExamples ?? 20;
-  const maxWrongGuesses = options.maxWrongGuesses ?? DEFAULT_WRONG_GUESSES;
-  const maxTurns = options.maxTurns ?? 20;
-  const words = options.wordList ?? generateWordList();
+	const numTrainExamples = options.numTrainExamples ?? 100;
+	const numEvalExamples = options.numEvalExamples ?? 20;
+	const maxWrongGuesses = options.maxWrongGuesses ?? DEFAULT_WRONG_GUESSES;
+	const maxTurns = options.maxTurns ?? 20;
+	const words = options.wordList ?? generateWordList();
 
-  const game = new HangmanGame({ maxWrongGuesses });
-  const parser = game.parser;
+	const game = new HangmanGame({ maxWrongGuesses });
+	const parser = game.parser;
 
-  const trainData = createHangmanDataset(numTrainExamples, words);
-  const evalData = createHangmanDataset(numEvalExamples, words);
+	const trainData = createHangmanDataset(numTrainExamples, words);
+	const evalData = createHangmanDataset(numEvalExamples, words);
 
-  const agentConfig = prepareHangmanAgent({
-    agent: options.agent,
-    systemPrompt: SYSTEM_PROMPT,
-  });
+	const agentConfig = prepareHangmanAgent({
+		agent: options.agent,
+		systemPrompt: SYSTEM_PROMPT,
+	});
 
-  const rewardFunctions: RewardFunc[] = [
-    correctnessReward,
-    efficiencyReward,
-    parser.getFormatRewardFunc(),
-  ];
+	const rewardFunctions: RewardFunc[] = [
+		correctnessReward,
+		efficiencyReward,
+		parser.getFormatRewardFunc(),
+	];
 
-  return createToolGameEnvironment({
-    envId: "hangman",
-    agent: agentConfig,
-    dataset: trainData,
-    evalDataset: evalData,
-    parser,
-    lifecycle: game,
-    rewardFunction: rewardFunctions,
-    rewardWeights: REWARD_WEIGHTS,
-    sandbox: sandboxEnabled
-      ? { enabled: true, config: options.sandbox?.config }
-      : { enabled: false },
-    envArgs: {
-      max_wrong_guesses: maxWrongGuesses,
-      max_turns: maxTurns,
-    },
-    maxTurns,
-  });
+	return createToolGameEnvironment({
+		envId: "hangman",
+		agent: agentConfig,
+		dataset: trainData,
+		evalDataset: evalData,
+		parser,
+		lifecycle: game,
+		rewardFunction: rewardFunctions,
+		rewardWeights: REWARD_WEIGHTS,
+		sandbox: { enabled: true, config: options.sandbox?.config },
+		envArgs: {
+			max_wrong_guesses: maxWrongGuesses,
+			max_turns: maxTurns,
+		},
+		maxTurns,
+	});
 }
 
 export const loadEnvironment = createHangmanEnvironment;
 
-export type { HangmanGameState } from "./game.js";
+export type { HangmanGameState } from "./game";
