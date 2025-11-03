@@ -6,7 +6,14 @@
 import { generateText } from "ai";
 type GenerateTextParams = Parameters<typeof generateText>[0];
 import type { Environment } from "../envs/environment.js";
-import type { Dataset, RewardFunc, Messages, State } from "../types/index.js";
+import type {
+  Dataset,
+  RewardFunc,
+  Messages,
+  State,
+  Info,
+  ChatMessage,
+} from "../types/index.js";
 import type { Parser } from "../parsers/parser.js";
 import {
   GenerateTextAdapter,
@@ -46,6 +53,33 @@ export interface MultiTurnHooks {
   options?: Omit<MultiTurnGenerateTextAdapterOptions, "agent" | "argsToSkip" | "sandboxConfig">;
 }
 
+export type DatasetExample = {
+  prompt: Messages;
+  answer?: string;
+  example_id?: number;
+  task?: string;
+  info?: Info;
+};
+
+export type DatasetInput =
+  | Dataset
+  | DatasetExample[]
+  | (() => Promise<Dataset | DatasetExample[]>);
+
+export type SimpleRewardFunc = (
+  completion: Messages,
+  answer: string,
+  state?: State,
+  task?: string,
+  info?: Info
+) => number | Promise<number>;
+
+export type RewardInput =
+  | RewardFunc
+  | RewardFunc[]
+  | SimpleRewardFunc
+  | SimpleRewardFunc[];
+
 export interface RLEnvironmentConfig {
   /**
    * GenerateText configuration object
@@ -60,18 +94,18 @@ export interface RLEnvironmentConfig {
    * Dataset for evaluation/training
    * Can be a Dataset object or a function that returns a Promise<Dataset>
    */
-  dataset?: Dataset | (() => Promise<Dataset>);
+  dataset?: DatasetInput;
 
   /**
    * Evaluation dataset (optional, falls back to dataset if not provided)
    */
-  evalDataset?: Dataset | (() => Promise<Dataset>);
+  evalDataset?: DatasetInput;
 
   /**
    * Reward function(s) for evaluation
-   * Can be a single function or array of functions
-   */
-  rewardFunction: RewardFunc | RewardFunc[];
+   * Accepts full RewardFunc signatures or simplified (completion, answer) functions
+  */
+  rewardFunction: RewardInput;
 
   /**
    * Weights for reward functions (if multiple)
@@ -155,33 +189,20 @@ export async function createRLEnvironment(
   }
 
   // Set up rubric first
-  const rewardFuncs = Array.isArray(config.rewardFunction)
-    ? config.rewardFunction
-    : [config.rewardFunction];
-
   const parser = config.parser || new DefaultParser();
+  const { funcs: rewardFuncs, weights: rewardWeights } = normalizeRewardFunctions(
+    config.rewardFunction,
+    config.rewardWeights
+  );
   const rubric = new Rubric({
     funcs: rewardFuncs,
-    weights: config.rewardWeights,
+    weights: rewardWeights,
     parser,
   });
 
   // Load dataset(s) if provided (before creating adapter)
-  let dataset: Dataset | undefined;
-  if (config.dataset) {
-    dataset =
-      typeof config.dataset === "function"
-        ? await config.dataset()
-        : config.dataset;
-  }
-
-  let evalDataset: Dataset | undefined;
-  if (config.evalDataset) {
-    evalDataset =
-      typeof config.evalDataset === "function"
-        ? await config.evalDataset()
-        : config.evalDataset;
-  }
+  const dataset = await resolveDataset(config.dataset);
+  const evalDataset = await resolveDataset(config.evalDataset);
 
   const baseAdapterOptions: GenerateTextAdapterOptions = {
     agent: {
@@ -253,6 +274,81 @@ export async function createRLEnvironment(
   }
 
   return new GenerateTextAdapter(baseAdapterOptions);
+}
+
+async function resolveDataset(
+  input?: DatasetInput
+): Promise<Dataset | undefined> {
+  if (!input) {
+    return undefined;
+  }
+
+  const resolved = typeof input === "function" ? await input() : input;
+  if (Array.isArray(resolved)) {
+    return datasetFromExamples(resolved);
+  }
+
+  return resolved;
+}
+
+function datasetFromExamples(examples: DatasetExample[]): Dataset {
+  const prompts: Messages[] = [];
+  const answers: string[] = [];
+  const exampleIds: number[] = [];
+  const tasks: string[] = [];
+  const infos: Info[] = [];
+
+  examples.forEach((example, idx) => {
+    prompts.push(coerceMessages(example.prompt));
+    answers.push(example.answer ?? "");
+    exampleIds.push(example.example_id ?? idx);
+    tasks.push(example.task ?? "default");
+    infos.push(example.info ?? {});
+  });
+
+  return {
+    column_names: ["prompt", "answer", "example_id", "task", "info"],
+    prompt: prompts,
+    answer: answers,
+    example_id: exampleIds,
+    task: tasks,
+    info: infos,
+  } as Dataset;
+}
+
+function coerceMessages(value: Messages | ChatMessage | string | undefined): Messages {
+  if (value === undefined || value === null) {
+    return [];
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value as Messages;
+  }
+
+  if (typeof value === "object") {
+    return [value as ChatMessage];
+  }
+
+  return String(value);
+}
+
+function normalizeRewardFunctions(
+  rewardInput: RewardInput,
+  weights?: number[]
+): { funcs: RewardFunc[]; weights?: number[] } {
+  const arrayInput = Array.isArray(rewardInput)
+    ? rewardInput
+    : [rewardInput];
+
+  const funcs = arrayInput.map((fn) => fn as RewardFunc);
+  const normalizedWeights =
+    weights && weights.length > 0 ? weights : undefined;
+
+  return { funcs, weights: normalizedWeights };
 }
 
 /**
@@ -365,34 +461,19 @@ export async function createMultiTurnRLEnvironment(
     console.warn("[Sandbox] createMultiTurnRLEnvironment: sandbox NOT enabled, config.sandbox:", JSON.stringify(config.sandbox));
   }
 
-  // Set up rubric first
-  const rewardFuncs = Array.isArray(config.rewardFunction)
-    ? config.rewardFunction
-    : [config.rewardFunction];
-
   const parser = config.parser || new DefaultParser();
+  const { funcs: rewardFuncs, weights: rewardWeights } = normalizeRewardFunctions(
+    config.rewardFunction,
+    config.rewardWeights
+  );
   const rubric = new Rubric({
     funcs: rewardFuncs,
-    weights: config.rewardWeights,
+    weights: rewardWeights,
     parser,
   });
 
-  // Load dataset(s) if provided (before creating adapter)
-  let dataset: Dataset | undefined;
-  if (config.dataset) {
-    dataset =
-      typeof config.dataset === "function"
-        ? await config.dataset()
-        : config.dataset;
-  }
-
-  let evalDataset: Dataset | undefined;
-  if (config.evalDataset) {
-    evalDataset =
-      typeof config.evalDataset === "function"
-        ? await config.evalDataset()
-        : config.evalDataset;
-  }
+  const dataset = await resolveDataset(config.dataset);
+  const evalDataset = await resolveDataset(config.evalDataset);
 
   // Create adapter with generateText configuration
   // Use an internal concrete class that extends MultiTurnGenerateTextAdapter
@@ -426,4 +507,3 @@ export async function createMultiTurnRLEnvironment(
 
   return adapter;
 }
-

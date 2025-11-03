@@ -73,6 +73,10 @@ export {
 } from "./factories/tool-game-environment.js";
 export type {
   RLEnvironmentConfig,
+  DatasetInput,
+  DatasetExample,
+  RewardInput,
+  SimpleRewardFunc,
   SandboxConfig as RLEnvironmentSandboxConfig,
 } from "./factories/create-rl-environment.js";
 

@@ -10,18 +10,75 @@ The Hangman environment showcases how little code is required to build a multi-t
 - `src/index.ts` &mdash; wires the pieces together via `createToolGameEnvironment`.
 - `hangman.py` &mdash; Python bridge so `vf-eval` can load the TS environment.
 
+### pre-requisites
+
+install uv and prime cli
+```bash
+#install uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install prime
+uv tool install prime
+```
+
 ### Quick start
 
 ```bash
+cd verifiers-ts/environments/hangman
+pnpm install
+pnpm build
+
 # install dependenices once
 uv sync
-uv run pre-commit install
 
 # evaluate the bundled dataset with your model
-uv run vf-eval hangman -n 5 -m gpt-4.1-mini
+uv run vf-eval hangman -n 1 -r 1 -m gpt-5-mini -s -c 2
+
+# browse the evaluation runs
+uv run vf-tui outputs
 ```
 
 > ℹ️ The project uses `uv` for dependency management and expects that you build artifacts separately (see `AGENTS.md` for full setup guidance).
+
+This is the result of the run:
+![Hangman evaluation screenshot: A Hangman run with LLM agent making letter guesses via the guess_letter tool. Shows agent turns, game state updates, and reward feedback.](./@CleanShot%202025-11-03%20at%2019.07.24.png)
+
+
+### Core snippets
+
+```ts
+import {
+  createToolGameEnvironment,
+  type RewardFunc,
+} from "verifiers-ts";
+import { HangmanGame, createHangmanDataset } from "./src/game";
+import { prepareHangmanAgent } from "./src/agent";
+import { correctnessReward, efficiencyReward } from "./src/rewards";
+
+// 1. Tools + agent
+const agent = prepareHangmanAgent({ systemPrompt: "Play Hangman carefully." });
+
+// 2. Dataset (raw examples, auto-normalized by the factory)
+const dataset = createHangmanDataset(10, ["alpha", "beta", "gamma"]);
+
+// 3. Rewards (simple RewardFunc array)
+const rewards: RewardFunc[] = [correctnessReward, efficiencyReward];
+
+// 4. Game lifecycle (setup/onTurn/isCompleted hooks)
+const game = new HangmanGame({ maxWrongGuesses: 6 });
+
+// 5. Create RL environment
+const env = await createToolGameEnvironment({
+  envId: "hangman",
+  agent,
+  dataset,
+  rewardFunction: rewards,
+  lifecycle: game,
+});
+```
 
 ### Customising the demo
 
@@ -57,4 +114,3 @@ Because the environment relies on `createToolGameEnvironment`, you get:
 4. Call `createToolGameEnvironment({ envId, agent, lifecycle, rewardFunction, ... })`.
 
 Use the Hangman implementation as a template and replace only the domain-specific logic.
-

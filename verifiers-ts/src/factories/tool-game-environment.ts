@@ -79,13 +79,13 @@ function normalizeTurnResult(
     return [result, fallbackState];
   }
 
-  const messages =
+  const messages: Messages =
     result.messages !== undefined
       ? result.messages
       : result.reply !== undefined
       ? [
           {
-            role: "user",
+            role: "user" as const,
             content: result.reply,
           },
         ]
