@@ -59,7 +59,18 @@ export {
 } from "./agents/multiturn-generate-text-adapter.js";
 
 // Factories
-export { createRLEnvironment, createMultiTurnRLEnvironment, createSandboxTools } from "./factories/create-rl-environment.js";
+export {
+  createRLEnvironment,
+  createMultiTurnRLEnvironment,
+  createSandboxTools,
+} from "./factories/create-rl-environment.js";
+export {
+  createToolGameEnvironment,
+  type ToolGameEnvironmentConfig,
+  type ToolGameLifecycle,
+  type ToolGameTurnArgs,
+  type ToolGameTurnResult,
+} from "./factories/tool-game-environment.js";
 export type {
   RLEnvironmentConfig,
   SandboxConfig as RLEnvironmentSandboxConfig,
@@ -81,4 +92,3 @@ export {
   formatDataset,
   type LoadDatasetOptions,
 } from "./datasets/loaders.js";
-

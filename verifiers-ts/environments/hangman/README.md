@@ -1,261 +1,60 @@
-# Hangman Environment
+## Hangman Demo Environment
 
-A multi-turn interactive Hangman game environment for `verifiers-ts`, where the model guesses letters to reveal a secret word.
+The Hangman environment showcases how little code is required to build a multi-turn, tool-driven RL environment with the TypeScript verifiers SDK. Everything specific to the game lives in this folder (dataset, game rules, rewards, agent), while the SDK supplies the rollout loop, sandboxing, and evaluation plumbing.
 
-## Overview
+### What lives here?
 
-The Hangman environment extends `MultiTurnEnv` to create an interactive game where:
-- The model guesses one letter at a time
-- The environment reveals letter positions for correct guesses
-- The model has 6 wrong guesses before losing
-- Visual feedback shows word state, wrong guesses, and available letters
+- `src/game.ts` &mdash; the Hangman state machine. Implements `ToolGameLifecycle` so the SDK can drive each turn.
+- `src/agent.ts` &mdash; minimal AI SDK agent config plus the `guess_letter` tool definition.
+- `src/rewards.ts` &mdash; two reward functions (`correctness`, `efficiency`) and their weights.
+- `src/index.ts` &mdash; wires the pieces together via `createToolGameEnvironment`.
+- `hangman.py` &mdash; Python bridge so `vf-eval` can load the TS environment.
 
-## Running with vf-eval
-
-### Installation
-
-First, ensure you're in the verifiers root directory and install dependencies:
+### Quick start
 
 ```bash
-cd verifiers-ts/environments/hangman
-pnpm install
-cd ../../..
+# install dependenices once
 uv sync
+uv run pre-commit install
+
+# evaluate the bundled dataset with your model
+uv run vf-eval hangman -n 5 -m gpt-4.1-mini
 ```
 
-### Basic Usage
+> ℹ️ The project uses `uv` for dependency management and expects that you build artifacts separately (see `AGENTS.md` for full setup guidance).
 
-Run an evaluation with `vf-eval`:
+### Customising the demo
 
-```bash
-uv run vf-eval hangman -n 10 -m gpt-4o-mini
-```
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `maxWrongGuesses` | Number of incorrect guesses before the game ends. | 6 |
+| `maxTurns` | Hard cap on dialogue turns. | 20 |
+| `numTrainExamples` / `numEvalExamples` | Dataset sizes generated from the built-in word list. | 100 / 20 |
+| `wordList` | Replace with your own vocabulary to theme the game. | `DEFAULT_WORD_LIST` from `game.ts` |
+| `sandbox` | Enable Prime Intellect sandbox tools for agents that need execution. | Enabled |
 
-### Options
+Pass these through `createHangmanEnvironment({ ... })` or `load_environment(**kwargs)` in Python.
 
-- `-n, --num-examples`: Number of examples to evaluate (default: 10)
-- `-m, --model`: Model to use (e.g., `gpt-4o-mini`, `gpt-4o`)
-- `-r, --rollouts-per-example`: Number of rollouts per example (default: 1)
-- `-s, --save`: Save results to disk
-- `--num-train-examples`: Number of training examples (default: 100)
-- `--num-eval-examples`: Number of evaluation examples (default: 20)
-- `--max-wrong-guesses`: Maximum wrong guesses allowed (default: 6)
-- `--max-turns`: Maximum turns per game (default: 20)
+### How the pieces fit
 
-### Examples
+1. **Agent** – `prepareHangmanAgent` adds the `guess_letter` tool and the system prompt.
+2. **Game lifecycle** – `HangmanGame` implements `setupState`, `onTurn`, and `isCompleted`. The SDK invokes these via `createToolGameEnvironment`.
+3. **Dataset** – `createHangmanDataset` generates simple prompts that seed the rollout with a secret word.
+4. **Rewards** – `correctnessReward` awards 1.0 for victory, `efficiencyReward` scales up to 0.5 for using fewer wrong guesses, and the SDK’s format reward adds 0.2.
 
-```bash
-# Quick test run
-uv run vf-eval hangman -n 5 -m gpt-4o-mini -s
+Because the environment relies on `createToolGameEnvironment`, you get:
 
-# Full evaluation with custom settings
-uv run vf-eval hangman -n 50 -r 3 -m gpt-4o --num-train-examples 200 --max-turns 15
-```
+- Automatic rollout loop with tool-call handling.
+- Optional sandbox integration without extra code.
+- Drop-in reward/rubric wiring.
+- Shared TypeScript + Python loading interfaces.
 
-## Direct TypeScript Usage
+### Porting your own game
 
-### Basic Usage
+1. Implement a subclass (or plain object) with `setupState`, `onTurn`, and `isCompleted`.
+2. Build or import an AI SDK agent config.
+3. Provide reward functions and (optionally) a dataset generator.
+4. Call `createToolGameEnvironment({ envId, agent, lifecycle, rewardFunction, ... })`.
 
-```typescript
-import { createHangmanEnvironment } from "./src/index.js";
-
-// Create environment with a single factory call (loadEnvironment() is an alias)
-const env = await createHangmanEnvironment({
-  numTrainExamples: 100,
-  numEvalExamples: 20,
-  maxWrongGuesses: 6,
-  maxTurns: 20,
-});
-
-// loadEnvironment() is still available and forwards to createHangmanEnvironment()
-
-// Run evaluation
-const results = await env.evaluate("gpt-4o-mini", {}, 10);
-
-// Access results
-console.log(results.metadata.avg_reward);
-console.log(results.reward);
-```
-
-### Tool-Based Guessing (Default Behavior)
-
-The Hangman environment uses AI SDK's `tool()` function directly for making guesses. By default, a `guess_letter` tool is automatically added to the agent config. The model calls this tool to make guesses instead of using text format:
-
-```typescript
-import { createHangmanEnvironment } from "./src/index.js";
-
-// The guess_letter tool is automatically included
-const env = await createHangmanEnvironment({
-  numTrainExamples: 100,
-});
-
-// Model will call guess_letter({letter: "A"}) to make guesses
-const results = await env.evaluate("gpt-4o-mini", {}, 10);
-```
-
-### With Custom AI SDK Agent Config
-
-The Hangman environment supports the AI SDK agent pattern, allowing you to customize the model, system prompt, tools, and sampling arguments. You can also provide your own tools or override the default `guess_letter` tool:
-
-```typescript
-import { createHangmanEnvironment } from "./src/index.js";
-import { openai } from "@ai-sdk/openai";
-import { stepCountIs } from "ai";
-
-// Load environment with custom agent configuration
-const env = await createHangmanEnvironment({
-  numTrainExamples: 100,
-  numEvalExamples: 20,
-  maxWrongGuesses: 6,
-  maxTurns: 20,
-  agent: {
-    model: openai("gpt-4o"), // Custom model
-    system: "You are an expert Hangman player. Think strategically about letter frequency.",
-    temperature: 0.3, // Lower temperature for more consistent play
-    maxOutputTokens: 50, // Short responses
-    stopWhen: stepCountIs(5), // Limit tool steps if using tools
-  },
-});
-
-// Run evaluation
-const results = await env.evaluate("gpt-4o", {}, 10);
-```
-
-### Using createMultiTurnRLEnvironment Directly
-
-You can also use the factory function directly for more control:
-
-### Simple Agent Configuration (Recommended)
-
-The simplest way matches the `example-generate-text-agent` pattern - just pass the `generateText` config object. The `guess_letter` tool is automatically included:
-
-```typescript
-import { createHangmanEnvironment } from "./src/index.js";
-import { openai } from "@ai-sdk/openai";
-
-const env = await createHangmanEnvironment({
-  agent: {
-    model: openai("gpt-4o-mini"),
-    system: "You are an expert Hangman player.",
-    temperature: 0.3,
-  },
-  numTrainExamples: 100,
-});
-```
-
-### Custom Tools
-
-You can provide your own tools alongside or instead of the default `guess_letter` tool. If you provide a `guess_letter` tool, it will override the default:
-
-```typescript
-import { createHangmanEnvironment } from "./src/index.js";
-import { openai } from "@ai-sdk/openai";
-import { tool } from "ai";
-import { z } from "zod";
-
-// Custom guess_letter tool (overrides default)
-const customGuessTool = tool({
-  description: "My custom guess tool",
-  inputSchema: z.object({
-    letter: z.string().length(1),
-  }),
-  execute: async ({ letter }) => {
-    return `Custom guess: ${letter}`;
-  },
-});
-
-// Additional custom tool
-const helperTool = tool({
-  description: "Helper tool for strategy",
-  inputSchema: z.object({}),
-  execute: async () => {
-    return "Strategy advice";
-  },
-});
-
-const env = await createHangmanEnvironment({
-  agent: {
-    model: openai("gpt-4o-mini"),
-    tools: {
-      guess_letter: customGuessTool, // Overrides default
-      helper: helperTool, // Additional tool
-    },
-  },
-});
-```
-
-## Game Rules
-
-1. The model guesses one letter per turn
-2. Correct guesses reveal all positions of that letter
-3. Wrong guesses reduce remaining attempts
-4. The game is won when all letters are revealed
-5. The game is lost after 6 wrong guesses
-
-## Reward Functions
-
-The environment includes three reward functions:
-
-1. **Correctness Reward** (weight: 1.0): 1.0 if the word was guessed correctly, 0.0 otherwise
-2. **Efficiency Reward** (weight: 0.5): Bonus based on fewer wrong guesses (higher reward for 0 wrong guesses)
-3. **Format Reward** (weight: 0.2): Reward for using correct format (primarily for tool calls, with XML fallback)
-
-## Visual Feedback
-
-Each turn displays:
-
-```
-Word: _ _ _ _ _
-Wrong guesses: 0/6
-Guessed letters: 
-Available: A B C D E F G H I J K L M N O P Q R S T U V W X Y Z
-
-Guess a letter:
-```
-
-After a win:
-```
-🎉 Congratulations! You guessed the word: APPLE
-Word: A P P L E
-Wrong guesses: 1/6
-```
-
-After a loss:
-```
-💀 Game Over! The word was: APPLE
-Word: _ P P _ _
-Wrong guesses: 6/6 (X, Y, Z, Q, W, V)
-```
-
-## Implementation Details
-
-- **Tool-Based Guessing**: Uses AI SDK's `tool()` function directly - no wrappers needed. The `guess_letter` tool is automatically added to the agent config.
-- **Tool Call Extraction**: The environment extracts guesses from tool calls in `envResponse()`, with fallback to text parsing for backward compatibility.
-- **Parser**: Uses `XMLParser` with field `["guess"]` as fallback for text-based guesses
-- **State Management**: Game state stored in `state.gameState` with:
-  - `secretWord`: The word to guess
-  - `guessedLetters`: Array of guessed letters
-  - `wrongGuesses`: Number of incorrect guesses
-  - `gameWon`: Boolean flag for win condition
-  - `gameLost`: Boolean flag for loss condition
-  - `wordDisplay`: Current visual display string
-
-## Customization
-
-You can customize the word list, max wrong guesses, agent config, and other settings:
-
-```typescript
-const env = await createHangmanEnvironment({
-  agent: {
-    model: openai("gpt-4o"),
-    system: "Custom system prompt",
-    temperature: 0.7,
-  },
-  numTrainExamples: 100,
-  numEvalExamples: 20,
-  maxWrongGuesses: 6,
-  maxTurns: 20,
-  wordList: ["apple", "banana", "custom", "words"],
-});
-```
+Use the Hangman implementation as a template and replace only the domain-specific logic.
 
