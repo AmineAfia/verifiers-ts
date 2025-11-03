@@ -30,16 +30,30 @@ npm run build
 ### Minimal RL Environment
 
 ```typescript
-import { tool, generateText } from "ai";
+import { generateText, tool } from "ai";
+import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
 import { createRLEnvironment } from "verifiers-ts";
 
-const checkTool = (tool as any)({
-  description: "Check whether the guess matches the target.",
-  execute: async (value: any) => `Guessed ${String(value?.guess ?? value)}` ,
+const getCurrentWeather = tool({
+  description: "Get the current weather for a specific location.",
+  parameters: z.object({
+    location: z
+      .string()
+      .describe("City and state, for example: Seattle, WA"),
+    unit: z
+      .enum(["celsius", "fahrenheit"])
+      .describe("Temperature unit to return.")
+      .optional(),
+  }),
+  execute: async ({ location, unit }) => {
+    const preferredUnit = unit ?? "celsius";
+    const temperature = preferredUnit === "celsius" ? 18 : 64;
+    return `It is ${temperature}°${preferredUnit === "celsius" ? "C" : "F"} and sunny in ${location}.`;
+  },
 });
 
-const minimalAgent = {
+const weatherAgent = {
   generateText: (messages: any, options: Record<string, unknown> = {}) => {
     const { tools = {}, ...rest } = options as {
       tools?: Record<string, ReturnType<typeof tool>>;
@@ -47,22 +61,28 @@ const minimalAgent = {
 
     return generateText({
       model: openai("gpt-4o-mini") as any,
-      system: "Answer questions accurately.",
+      system:
+        "You are WeatherBot. When a user asks about the weather, call the getCurrentWeather tool and report the results clearly.",
       temperature: 0,
-      tools: { check_answer: checkTool, ...tools },
-      ...rest,
+      tools: { getCurrentWeather, ...tools },
       messages,
+      ...rest,
     });
   },
-  tools: { check_answer: checkTool },
+  tools: { getCurrentWeather },
 };
 
 const env = await createRLEnvironment({
-  agent: minimalAgent,
+  agent: weatherAgent,
   dataset: [
     {
-      prompt: [{ role: "user", content: "What is 2+2?" }],
-      answer: "4",
+      prompt: [
+        {
+          role: "user",
+          content: "What's the weather like in Seattle right now?",
+        },
+      ],
+      answer: "seattle",
     },
   ],
   rewardFunction: (completion, answer) => {
@@ -80,7 +100,8 @@ const env = await createRLEnvironment({
       : typeof completion === "string"
       ? completion
       : "";
-    return text.toLowerCase().includes(answer.toLowerCase()) ? 1 : 0;
+    const normalized = text.toLowerCase();
+    return normalized.includes(answer) && normalized.includes("weather") ? 1 : 0;
   },
 });
 ```
