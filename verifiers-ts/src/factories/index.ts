@@ -10,6 +10,7 @@ export {
   type DatasetExample,
   type RewardInput,
   type SimpleRewardFunc,
+  type GenerateTextAgent,
 } from "./create-rl-environment.js";
 
 export {

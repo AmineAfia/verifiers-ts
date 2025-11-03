@@ -61,7 +61,6 @@ export {
 // Factories
 export {
   createRLEnvironment,
-  createMultiTurnRLEnvironment,
   createSandboxTools,
 } from "./factories/create-rl-environment.js";
 export {
@@ -77,6 +76,7 @@ export type {
   DatasetExample,
   RewardInput,
   SimpleRewardFunc,
+  GenerateTextAgent,
   SandboxConfig as RLEnvironmentSandboxConfig,
 } from "./factories/create-rl-environment.js";
 

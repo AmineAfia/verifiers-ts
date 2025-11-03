@@ -27,6 +27,64 @@ npm run build
 
 ## Quick Start
 
+### Minimal RL Environment
+
+```typescript
+import { tool, generateText } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { createRLEnvironment } from "verifiers-ts";
+
+const checkTool = (tool as any)({
+  description: "Check whether the guess matches the target.",
+  execute: async (value: any) => `Guessed ${String(value?.guess ?? value)}` ,
+});
+
+const minimalAgent = {
+  generateText: (messages: any, options: Record<string, unknown> = {}) => {
+    const { tools = {}, ...rest } = options as {
+      tools?: Record<string, ReturnType<typeof tool>>;
+    };
+
+    return generateText({
+      model: openai("gpt-4o-mini") as any,
+      system: "Answer questions accurately.",
+      temperature: 0,
+      tools: { check_answer: checkTool, ...tools },
+      ...rest,
+      messages,
+    });
+  },
+  tools: { check_answer: checkTool },
+};
+
+const env = await createRLEnvironment({
+  agent: minimalAgent,
+  dataset: [
+    {
+      prompt: [{ role: "user", content: "What is 2+2?" }],
+      answer: "4",
+    },
+  ],
+  rewardFunction: (completion, answer) => {
+    const text = Array.isArray(completion)
+      ? completion
+          .filter(
+            (msg) =>
+              typeof msg === "object" &&
+              msg !== null &&
+              "role" in msg &&
+              msg.role === "assistant"
+          )
+          .map((msg) => (msg as { content?: string }).content ?? "")
+          .join(" ")
+      : typeof completion === "string"
+      ? completion
+      : "";
+    return text.toLowerCase().includes(answer.toLowerCase()) ? 1 : 0;
+  },
+});
+```
+
 ### Single-Turn Environment
 
 ```typescript

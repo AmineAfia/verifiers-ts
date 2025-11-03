@@ -3,10 +3,10 @@
  * Uses AI SDK's native tool() function
  */
 
-import { tool } from "ai";
+import { tool, type Tool } from "ai";
 import { z } from "zod";
 
-export type AISDKTool = ReturnType<typeof tool>;
+export type AISDKTool = Tool<any, any>;
 
 export interface ToolDefinition {
   name: string;

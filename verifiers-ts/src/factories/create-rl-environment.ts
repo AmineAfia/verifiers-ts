@@ -1,30 +1,16 @@
-/**
- * Factory function for creating RL environments from generateText configurations
- * Enables easy conversion of AI SDK agents into verifiers RL environments
- */
+export type { GenerateTextAgent } from "../agents/generate-text-adapter.js";
 
-import { generateText } from "ai";
-type GenerateTextParams = Parameters<typeof generateText>[0];
 import type { Environment } from "../envs/environment.js";
-import type {
-  Dataset,
-  RewardFunc,
-  Messages,
-  State,
-  Info,
-  ChatMessage,
-} from "../types/index.js";
+import type { Dataset, RewardFunc, Messages, State, Info } from "../types/index.js";
 import type { Parser } from "../parsers/parser.js";
-import {
-  GenerateTextAdapter,
-  type GenerateTextAdapterOptions,
-} from "../agents/generate-text-adapter.js";
+import { Rubric } from "../rubrics/rubric.js";
+import { Parser as DefaultParser } from "../parsers/parser.js";
+import { GenerateTextAdapter, type GenerateTextAgent } from "../agents/generate-text-adapter.js";
 import {
   MultiTurnGenerateTextAdapter,
   type MultiTurnGenerateTextAdapterOptions,
 } from "../agents/multiturn-generate-text-adapter.js";
-import { Rubric } from "../rubrics/rubric.js";
-import { Parser as DefaultParser } from "../parsers/parser.js";
+import type { AISDKTool } from "../utils/tool-utils.js";
 import { defineTool, createAISDKTool } from "../utils/tool-utils.js";
 import { z } from "zod";
 import { getSandboxClient } from "../utils/sandbox-client.js";
@@ -50,7 +36,7 @@ export interface MultiTurnHooks {
   ) => Promise<[Messages, State]>;
   setupState?: (state: State) => Promise<State>;
   isCompleted?: (messages: Messages, state: State) => Promise<boolean>;
-  options?: Omit<MultiTurnGenerateTextAdapterOptions, "agent" | "argsToSkip" | "sandboxConfig">;
+  options?: Omit<MultiTurnGenerateTextAdapterOptions, "agent" | "dataset" | "evalDataset" | "parser" | "rubric" | "sandboxTools" | "sandboxArgsToSkip">;
 }
 
 export type DatasetExample = {
@@ -81,114 +67,24 @@ export type RewardInput =
   | SimpleRewardFunc[];
 
 export interface RLEnvironmentConfig {
-  /**
-   * GenerateText configuration object
-   * Pass generateText options (without messages/prompt) here
-   * Example: { model: openai('gpt-4o'), system: '...', tools: {...}, stopWhen: stepCountIs(10) }
-   * 
-   * Note: Uses 'any' to handle AI SDK type compatibility between LanguageModelV1 and LanguageModel
-   */
-  agent: any; // eslint-disable-line @typescript-eslint/no-explicit-any
-
-  /**
-   * Dataset for evaluation/training
-   * Can be a Dataset object or a function that returns a Promise<Dataset>
-   */
+  agent: GenerateTextAgent;
   dataset?: DatasetInput;
-
-  /**
-   * Evaluation dataset (optional, falls back to dataset if not provided)
-   */
   evalDataset?: DatasetInput;
-
-  /**
-   * Reward function(s) for evaluation
-   * Accepts full RewardFunc signatures or simplified (completion, answer) functions
-  */
   rewardFunction: RewardInput;
-
-  /**
-   * Weights for reward functions (if multiple)
-   * Defaults to 1.0 for each function
-   */
   rewardWeights?: number[];
-
-  /**
-   * Sandbox configuration (optional)
-   */
   sandbox?: {
     enabled: boolean;
     config?: SandboxConfig;
   };
-
-  /**
-   * Parser for extracting structured information from completions
-   * Defaults to Parser() if not provided
-   */
   parser?: Parser;
-
-  /**
-   * Environment ID (optional, used for results path)
-   */
   envId?: string;
-
-  /**
-   * Additional environment arguments (optional)
-   */
-  envArgs?: Record<string, any>;
-
-  /**
-   * Optional multi-turn hooks for environments that need custom envResponse logic
-   */
+  envArgs?: Record<string, unknown>;
   multiTurn?: MultiTurnHooks;
 }
 
-/**
- * Create an RL environment from a generateText configuration
- *
- * @example
- * ```typescript
- * const env = createRLEnvironment({
- *   agent: {
- *     model: openai('gpt-4o'),
- *     system: 'You are a helpful assistant.',
- *     tools: { weather: weatherTool },
- *     stopWhen: stepCountIs(10),
- *   },
- *   dataset: myDataset,
- *   rewardFunction: (result) => checkCorrectness(result.text, result.expectedAnswer),
- * });
- * ```
- */
 export async function createRLEnvironment(
   config: RLEnvironmentConfig
 ): Promise<Environment> {
-  // Extract generateText configuration from agent
-  const generateTextConfig = config.agent;
-
-  // Merge sandbox tools into agent's tools if enabled
-  let tools = generateTextConfig.tools || {};
-  const argsToSkip = new Map<string, string[]>();
-  let sandboxConfig: SandboxConfig | undefined;
-  
-  if (config.sandbox?.enabled) {
-    console.warn("[Sandbox] createRLEnvironment: sandbox enabled!");
-    const { tools: sandboxTools, argsToSkip: sandboxArgsToSkip } = createSandboxTools(
-      config.sandbox.config
-    );
-    tools = { ...tools, ...sandboxTools };
-    // Merge argsToSkip from sandbox tools
-    for (const [toolName, skippedArgs] of sandboxArgsToSkip.entries()) {
-      argsToSkip.set(toolName, skippedArgs);
-    }
-    // Use config.sandbox.config if provided, otherwise use empty object (will use defaults in adapter)
-    sandboxConfig = config.sandbox.config ?? {};
-    console.warn("[Sandbox] createRLEnvironment: sandboxConfig set to:", JSON.stringify(sandboxConfig));
-  } else {
-    console.warn("[Sandbox] createRLEnvironment: sandbox NOT enabled, config.sandbox:", JSON.stringify(config.sandbox));
-  }
-
-  // Set up rubric first
   const parser = config.parser || new DefaultParser();
   const { funcs: rewardFuncs, weights: rewardWeights } = normalizeRewardFunctions(
     config.rewardFunction,
@@ -200,57 +96,60 @@ export async function createRLEnvironment(
     parser,
   });
 
-  // Load dataset(s) if provided (before creating adapter)
   const dataset = await resolveDataset(config.dataset);
   const evalDataset = await resolveDataset(config.evalDataset);
 
-  const baseAdapterOptions: GenerateTextAdapterOptions = {
-    agent: {
-      ...generateTextConfig,
-      tools,
-    },
-    argsToSkip,
-    sandboxConfig,
-    parser,
-    rubric,
-    dataset,
-    evalDataset,
-    envId: config.envId,
-    envArgs: config.envArgs,
-  };
+  let sandboxTools: Record<string, AISDKTool> | undefined;
+  const sandboxArgsToSkip = new Map<string, string[]>();
+  let sandboxConfig: SandboxConfig | undefined;
+
+  if (config.sandbox?.enabled) {
+    const sandboxDetails = createSandboxTools(config.sandbox.config);
+    sandboxTools = sandboxDetails.tools;
+    sandboxDetails.argsToSkip.forEach((value, key) => {
+      sandboxArgsToSkip.set(key, value);
+    });
+    sandboxConfig = config.sandbox.config ?? {};
+  }
 
   if (config.multiTurn) {
-    const { setupState, isCompleted, envResponse, options: hookOptions } = config.multiTurn;
+    const multiTurn = config.multiTurn;
 
     class InternalMultiTurnAdapter extends MultiTurnGenerateTextAdapter {
+      constructor() {
+        super({
+          ...(multiTurn.options || {}),
+          agent: config.agent,
+          dataset,
+          evalDataset,
+          parser,
+          rubric,
+          sandboxTools,
+          sandboxArgsToSkip,
+          sandboxConfig,
+          envId: config.envId || undefined,
+          envArgs: config.envArgs || undefined,
+        } as MultiTurnGenerateTextAdapterOptions);
+      }
+
       async setupState(state: State): Promise<State> {
-        const baseState = await super.setupState(state);
-        if (setupState) {
-          return setupState(baseState);
+        const base = await super.setupState(state);
+        if (multiTurn.setupState) {
+          return multiTurn.setupState(base);
         }
-        return baseState;
+        return base;
       }
 
       async isCompleted(messages: Messages, state: State): Promise<boolean> {
         const baseCompleted = await super.isCompleted(messages, state);
         if (baseCompleted) {
+          await this.cleanupSandbox(state);
           return true;
         }
-        if (isCompleted) {
-          const customCompleted = await isCompleted(messages, state);
-          if (customCompleted) {
-            if (this.sandboxConfig && state.sandbox_id) {
-              const sandboxId = state.sandbox_id as string;
-              try {
-                console.warn(`[Sandbox] Cleaning up sandbox ${sandboxId} (custom completion)`);
-                const sandboxClient = await getSandboxClient();
-                await sandboxClient.deleteSandbox(sandboxId);
-                console.warn(`[Sandbox] Deleted sandbox ${sandboxId}`);
-                state.sandbox_id = undefined;
-              } catch (error) {
-                console.warn(`[Sandbox] Failed to delete sandbox ${sandboxId}:`, error);
-              }
-            }
+        if (multiTurn.isCompleted) {
+          const custom = await multiTurn.isCompleted(messages, state);
+          if (custom) {
+            await this.cleanupSandbox(state);
             return true;
           }
         }
@@ -261,19 +160,38 @@ export async function createRLEnvironment(
         messages: Messages,
         state: State
       ): Promise<[Messages, State]> {
-        return envResponse(messages, state);
+        return multiTurn.envResponse(messages, state);
+      }
+
+      private async cleanupSandbox(state: State): Promise<void> {
+        if (sandboxConfig && state.sandbox_id) {
+          try {
+            const sandboxClient = await getSandboxClient();
+            await sandboxClient.deleteSandbox(state.sandbox_id as string);
+          } catch (error) {
+            console.warn("[Sandbox] Failed to delete sandbox:", error);
+          } finally {
+            state.sandbox_id = undefined;
+          }
+        }
       }
     }
 
-    const adapterOptions: MultiTurnGenerateTextAdapterOptions = {
-      ...(hookOptions ?? {}),
-      ...baseAdapterOptions,
-    } as MultiTurnGenerateTextAdapterOptions;
-
-    return new InternalMultiTurnAdapter(adapterOptions);
+    return new InternalMultiTurnAdapter();
   }
 
-  return new GenerateTextAdapter(baseAdapterOptions);
+  return new GenerateTextAdapter({
+    agent: config.agent,
+    dataset,
+    evalDataset,
+    parser,
+    rubric,
+    sandboxTools,
+    sandboxArgsToSkip,
+    sandboxConfig,
+    envId: config.envId || undefined,
+    envArgs: config.envArgs || undefined,
+  });
 }
 
 async function resolveDataset(
@@ -298,10 +216,10 @@ function datasetFromExamples(examples: DatasetExample[]): Dataset {
   const tasks: string[] = [];
   const infos: Info[] = [];
 
-  examples.forEach((example, idx) => {
-    prompts.push(coerceMessages(example.prompt));
+  examples.forEach((example, index) => {
+    prompts.push(example.prompt);
     answers.push(example.answer ?? "");
-    exampleIds.push(example.example_id ?? idx);
+    exampleIds.push(example.example_id ?? index);
     tasks.push(example.task ?? "default");
     infos.push(example.info ?? {});
   });
@@ -316,194 +234,58 @@ function datasetFromExamples(examples: DatasetExample[]): Dataset {
   } as Dataset;
 }
 
-function coerceMessages(value: Messages | ChatMessage | string | undefined): Messages {
-  if (value === undefined || value === null) {
-    return [];
-  }
-
-  if (typeof value === "string") {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    return value as Messages;
-  }
-
-  if (typeof value === "object") {
-    return [value as ChatMessage];
-  }
-
-  return String(value);
-}
-
 function normalizeRewardFunctions(
   rewardInput: RewardInput,
   weights?: number[]
 ): { funcs: RewardFunc[]; weights?: number[] } {
-  const arrayInput = Array.isArray(rewardInput)
-    ? rewardInput
-    : [rewardInput];
-
+  const arrayInput = Array.isArray(rewardInput) ? rewardInput : [rewardInput];
   const funcs = arrayInput.map((fn) => fn as RewardFunc);
-  const normalizedWeights =
-    weights && weights.length > 0 ? weights : undefined;
-
+  const normalizedWeights = weights && weights.length > 0 ? weights : undefined;
   return { funcs, weights: normalizedWeights };
 }
 
-/**
- * Create sandbox tools for Prime Intellect sandbox integration
- * Returns tools with sandbox_id hidden from model schema (via argsToSkip)
- * and the argsToSkip map to pass to adapter
- */
 export function createSandboxTools(
   config?: SandboxConfig
 ): {
-  tools: Record<string, any>;
+  tools: Record<string, AISDKTool>;
   argsToSkip: Map<string, string[]>;
 } {
   const argsToSkip = new Map<string, string[]>();
-  
-  // Create bash tool for sandbox command execution
-  // sandbox_id is hidden from model (will be injected from state)
+
   const bashToolDef = defineTool(
     "bash",
     "Execute a bash command in the sandbox environment",
     z.object({
       command: z.string().describe("The bash command to execute in the sandbox"),
-      // Note: sandbox_id is NOT in the schema - it will be injected from state
     }),
     async (args: { command: string; sandbox_id?: string }) => {
-      // This will be called with sandbox_id injected via updateToolArgs
       const sandboxId = args.sandbox_id;
       if (!sandboxId) {
         throw new Error(
-          "sandbox_id is required but was not injected. " +
-          "This should not happen if sandbox lifecycle is properly set up."
+          "sandbox_id is required but was not provided. Ensure sandbox lifecycle is configured."
         );
       }
-      
-      // Execute command via sandbox client
+
       const sandboxClient = await getSandboxClient();
       const result = await sandboxClient.executeCommand(sandboxId, args.command);
-      
-      // Combine stdout and stderr for return
+
       let output = result.stdout;
       if (result.stderr) {
-        if (output) {
-          output = `${output}\nstderr:\n${result.stderr}`;
-        } else {
-          output = `stderr:\n${result.stderr}`;
-        }
+        output = output ? `${output}\nstderr:\n${result.stderr}` : `stderr:\n${result.stderr}`;
       }
-      
+
       return output || "(no output)";
     }
   );
-  
-  // Mark sandbox_id as an arg to skip (hidden from model)
+
   argsToSkip.set("bash", ["sandbox_id"]);
-  
-  // Create tool with schema that doesn't include sandbox_id
+
   const bashTool = createAISDKTool(bashToolDef);
-  
+
   return {
     tools: {
       bash: bashTool,
     },
     argsToSkip,
   };
-}
-
-/**
- * Create a multi-turn RL environment from a generateText configuration
- * Similar to createRLEnvironment but uses MultiTurnGenerateTextAdapter for multi-turn interactions
- *
- * @example
- * ```typescript
- * const env = createMultiTurnRLEnvironment({
- *   agent: {
- *     model: openai('gpt-4o'),
- *     system: 'You are playing a game.',
- *     tools: { move: moveTool },
- *     stopWhen: stepCountIs(10),
- *   },
- *   dataset: myDataset,
- *   rewardFunction: (result) => checkGameResult(result),
- * });
- * ```
- */
-export async function createMultiTurnRLEnvironment(
-  config: RLEnvironmentConfig
-): Promise<Environment> {
-  // Extract generateText configuration from agent
-  const generateTextConfig = config.agent;
-
-  // Merge sandbox tools into agent's tools if enabled
-  let tools = generateTextConfig.tools || {};
-  const argsToSkip = new Map<string, string[]>();
-  let sandboxConfig: SandboxConfig | undefined;
-  
-  if (config.sandbox?.enabled) {
-    console.warn("[Sandbox] createMultiTurnRLEnvironment: sandbox enabled!");
-    const { tools: sandboxTools, argsToSkip: sandboxArgsToSkip } = createSandboxTools(
-      config.sandbox.config
-    );
-    tools = { ...tools, ...sandboxTools };
-    // Merge argsToSkip from sandbox tools
-    for (const [toolName, skippedArgs] of sandboxArgsToSkip.entries()) {
-      argsToSkip.set(toolName, skippedArgs);
-    }
-    // Use config.sandbox.config if provided, otherwise use empty object (will use defaults in adapter)
-    sandboxConfig = config.sandbox.config ?? {};
-    console.warn("[Sandbox] createMultiTurnRLEnvironment: sandboxConfig set to:", JSON.stringify(sandboxConfig));
-  } else {
-    console.warn("[Sandbox] createMultiTurnRLEnvironment: sandbox NOT enabled, config.sandbox:", JSON.stringify(config.sandbox));
-  }
-
-  const parser = config.parser || new DefaultParser();
-  const { funcs: rewardFuncs, weights: rewardWeights } = normalizeRewardFunctions(
-    config.rewardFunction,
-    config.rewardWeights
-  );
-  const rubric = new Rubric({
-    funcs: rewardFuncs,
-    weights: rewardWeights,
-    parser,
-  });
-
-  const dataset = await resolveDataset(config.dataset);
-  const evalDataset = await resolveDataset(config.evalDataset);
-
-  // Create adapter with generateText configuration
-  // Use an internal concrete class that extends MultiTurnGenerateTextAdapter
-  // This allows the factory to work without requiring users to create their own subclass
-  class InternalMultiTurnAdapter extends MultiTurnGenerateTextAdapter {
-    async envResponse(
-      messages: Messages,
-      state: State
-    ): Promise<[Messages, State]> {
-      // Default implementation: return empty response
-      // Users should create their own class extending MultiTurnGenerateTextAdapter
-      // and implement envResponse for custom behavior
-      return [[], state];
-    }
-  }
-
-  const adapter = new InternalMultiTurnAdapter({
-    agent: {
-      ...generateTextConfig,
-      tools, // Include merged tools
-    },
-    argsToSkip, // Pass argsToSkip for stateful tool support
-    sandboxConfig, // Pass sandbox config for lifecycle management
-    parser,
-    rubric, // Pass rubric in constructor
-    dataset, // Pass dataset in constructor
-    evalDataset, // Pass evalDataset in constructor
-    envId: config.envId,
-    envArgs: config.envArgs,
-  });
-
-  return adapter;
 }

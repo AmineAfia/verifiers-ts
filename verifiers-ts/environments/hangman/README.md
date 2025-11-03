@@ -1,116 +1,170 @@
-## Hangman Demo Environment
+# Get Started: Build an RL Environment with verifiers
 
-The Hangman environment showcases how little code is required to build a multi-turn, tool-driven RL environment with the TypeScript verifiers SDK. Everything specific to the game lives in this folder (dataset, game rules, rewards, agent), while the SDK supplies the rollout loop, sandboxing, and evaluation plumbing.
+The Hangman demo walks you through every building block required to ship a multi-turn, tool-enabled RL evaluation using the `verifiers` TypeScript SDK. By the end you will understand how to structure your own environment and expose it to both the TypeScript and Python tooling.
 
-### What lives here?
+---
 
-- `src/game.ts` &mdash; the Hangman state machine. Implements `ToolGameLifecycle` so the SDK can drive each turn.
-- `src/agent.ts` &mdash; minimal AI SDK agent config plus the `guess_letter` tool definition.
-- `src/rewards.ts` &mdash; two reward functions (`correctness`, `efficiency`) and their weights.
-- `src/index.ts` &mdash; wires the pieces together via `createToolGameEnvironment`.
-- `hangman.py` &mdash; Python bridge so `vf-eval` can load the TS environment.
+## 1. Prerequisites
 
-### pre-requisites
+- Install [`uv`](https://github.com/astral-sh/uv) for Python dependency management.
+- Install [`pnpm`](https://pnpm.io/) for the TypeScript build.
+- (Optional) Install the Prime CLI for sandboxed tool execution:
 
-install uv and prime cli
 ```bash
-#install uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install uv (if not already installed)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install prime
 uv tool install prime
 ```
 
-### Quick start
+Make sure you have access to an AI SDK compatible model (e.g., OpenAI via `@ai-sdk/openai`) and the credentials set in your environment.
+
+---
+
+## 2. Clone and install
 
 ```bash
 cd verifiers-ts/environments/hangman
 pnpm install
-pnpm build
-
-# install dependenices once
-uv sync
-
-# evaluate the bundled dataset with your model
-uv run vf-eval hangman -n 1 -r 1 -m gpt-5-mini -s -c 2
-
-# browse the evaluation runs
-uv run vf-tui outputs
+pnpm build          # compiles the TypeScript sources
+uv sync             # installs Python side dependencies for vf-eval
 ```
 
-> ℹ️ The project uses `uv` for dependency management and expects that you build artifacts separately (see `AGENTS.md` for full setup guidance).
+These commands produce the compiled JS under `dist/` and ensure the Python CLI (`vf-eval`, `vf-tui`) can locate the environment.
 
-<img width="1412" height="1360" alt="image" src="https://github.com/user-attachments/assets/0ae2fd3c-4a95-4ce8-be59-5879c5ff75c2" />
+---
 
+## 3. Understand the anatomy
 
+This tutorial environment is intentionally small. Each file maps to a concept you will reuse in your own projects:
 
-### Core snippets
+| File | Concept | What it does |
+|------|---------|--------------|
+| `src/game.ts` | **Lifecycle** | Implements `ToolGameLifecycle` (`setupState`, `onTurn`, `isCompleted`) that defines per-turn logic. |
+| `src/agent.ts` | **Agent** | Wraps `generateText` from AI SDK and registers the `guess_letter` tool. |
+| `src/rewards.ts` | **Rewards & Rubric** | Provides reward functions and weights that score each rollout. |
+| `src/index.ts` | **Environment factory** | Calls `createToolGameEnvironment` to stitch everything together. |
+| `hangman.py` | **Python bridge** | Exposes `load_environment()` so Python tooling can import the environment. |
+
+Keep these responsibilities separate: the SDK handles the rollout loop, concurrency, and sandboxing; you provide domain-specific logic.
+
+---
+
+## 4. Implement the lifecycle
+
+`ToolGameLifecycle` is the contract that powers multi-turn, tool-augmented environments. In Hangman:
 
 ```ts
-import {
-  createToolGameEnvironment,
-  type RewardFunc,
-} from "verifiers-ts";
-import { HangmanGame, createHangmanDataset } from "./src/game";
-import { prepareHangmanAgent } from "./src/agent";
-import { correctnessReward, efficiencyReward } from "./src/rewards";
-
-// 1. Tools + agent
-const agent = prepareHangmanAgent({ systemPrompt: "Play Hangman carefully." });
-
-// 2. Dataset (raw examples, auto-normalized by the factory)
-const dataset = createHangmanDataset(10, ["alpha", "beta", "gamma"]);
-
-// 3. Rewards (simple RewardFunc array)
-const rewards: RewardFunc[] = [correctnessReward, efficiencyReward];
-
-// 4. Game lifecycle (setup/onTurn/isCompleted hooks)
-const game = new HangmanGame({ maxWrongGuesses: 6 });
-
-// 5. Create RL environment
-const env = await createToolGameEnvironment({
-  envId: "hangman",
-  agent,
-  dataset,
-  rewardFunction: rewards,
-  lifecycle: game,
-});
+export class HangmanGame implements ToolGameLifecycle {
+  async setupState(state: State) { /* create the initial game state */ }
+  async onTurn({ messages, state }: ToolGameTurnArgs) { /* parse guess, update state, emit feedback */ }
+  async isCompleted(_messages: Messages, state: State) { /* stop when win or loss */ }
+}
 ```
 
-### Customising the demo
+To adapt this pattern:
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `maxWrongGuesses` | Number of incorrect guesses before the game ends. | 6 |
-| `maxTurns` | Hard cap on dialogue turns. | 20 |
-| `numTrainExamples` / `numEvalExamples` | Dataset sizes generated from the built-in word list. | 100 / 20 |
-| `wordList` | Replace with your own vocabulary to theme the game. | `DEFAULT_WORD_LIST` from `game.ts` |
-| `sandbox` | Enable Prime Intellect sandbox tools for agents that need execution. | Enabled |
+1. Decide what state your task needs across turns.
+2. Parse the model’s response (using `XMLParser`, JSON, or custom logic).
+3. Emit new user messages (or tool results) that drive the next step.
 
-Pass these through `createHangmanEnvironment({ ... })` or `load_environment(**kwargs)` in Python.
+---
 
-### How the pieces fit
+## 5. Wire the agent and tools
 
-1. **Agent** – `prepareHangmanAgent` adds the `guess_letter` tool and the system prompt.
-2. **Game lifecycle** – `HangmanGame` implements `setupState`, `onTurn`, and `isCompleted`. The SDK invokes these via `createToolGameEnvironment`.
-3. **Dataset** – `createHangmanDataset` generates simple prompts that seed the rollout with a secret word.
-4. **Rewards** – `correctnessReward` awards 1.0 for victory, `efficiencyReward` scales up to 0.5 for using fewer wrong guesses, and the SDK’s format reward adds 0.2.
+Agents must expose a `generateText` function and a `tools` dictionary. Hangman wraps AI SDK’s `generateText`, injects a system prompt, and registers the `guess_letter` tool. Replace these pieces with your own prompt, safety settings, or tool definitions as needed.
 
-Because the environment relies on `createToolGameEnvironment`, you get:
+```ts
+export const hangmanAgent: GenerateTextAgent = {
+  generateText: hangmanGenerateText,
+  tools: { guess_letter: guessLetter },
+};
+```
 
-- Automatic rollout loop with tool-call handling.
-- Optional sandbox integration without extra code.
-- Drop-in reward/rubric wiring.
-- Shared TypeScript + Python loading interfaces.
+Tools are authored with `defineTool`/`tool` helpers and return plain text or structured JSON payloads back to the model.
 
-### Porting your own game
+---
 
-1. Implement a subclass (or plain object) with `setupState`, `onTurn`, and `isCompleted`.
-2. Build or import an AI SDK agent config.
-3. Provide reward functions and (optionally) a dataset generator.
-4. Call `createToolGameEnvironment({ envId, agent, lifecycle, rewardFunction, ... })`.
+## 6. Define rewards and weights
 
-Use the Hangman implementation as a template and replace only the domain-specific logic.
+Rewards are simple functions `(completion, answer, state) => number`. Combine them in a `Rubric` or pass a list plus weights.
+
+```ts
+export const correctnessReward: RewardFunc = ({ state }) =>
+  state.gameState?.gameWon ? 1 : 0;
+
+export const efficiencyReward: RewardFunc = ({ state }) =>
+  Math.max(0, 1 - state.gameState!.wrongGuesses / state.maxWrongGuesses);
+```
+
+Use multiple rewards to score accuracy, safety, efficiency, or formatting separately. The SDK will aggregate them using the provided weights.
+
+---
+
+## 7. Create the environment factory
+
+`createToolGameEnvironment` is the high-level helper that registers your environment, datasets, parser, and rewards.
+
+```ts
+export async function createHangmanEnvironment(
+  options: HangmanEnvironmentOptions = {}
+): Promise<Environment> {
+  const game = new HangmanGame({ maxWrongGuesses });
+  const parser = game.parser;
+  const rewardFunctions: RewardFunc[] = [
+    correctnessReward,
+    efficiencyReward,
+    parser.getFormatRewardFunc(),
+  ];
+
+  return createToolGameEnvironment({
+    envId: "hangman",
+    agent: options.agent ?? hangmanAgent,
+    dataset: trainData,
+    evalDataset: evalData,
+    parser,
+    lifecycle: game,
+    rewardFunction: rewardFunctions,
+    rewardWeights: [1.0, 0.5, 0.2],
+    sandbox: options.sandbox ?? { enabled: true },
+    maxTurns,
+  });
+}
+```
+
+Swap out `createToolGameEnvironment` for `createSingleTurnEnvironment`, `createMultiTurnEnvironment`, or other helpers depending on your task structure.
+
+---
+
+## 8. Run an evaluation
+
+After building the TypeScript bundle, you can evaluate the environment directly from Python using the CLI:
+
+```bash
+pnpm build
+uv run vf-eval hangman -n 5 -r 1 -m gpt-4.1-mini -s
+uv run vf-tui outputs   # browse results
+```
+
+By default, `vf-eval` picks up `load_environment()` from `hangman.py`, which simply forwards to `createHangmanEnvironment`.
+
+---
+
+## 9. Customize and extend
+
+Tweak the Hangman demo to explore different design choices:
+
+- Change `wordList`, `maxWrongGuesses`, or `maxTurns` by passing options to `createHangmanEnvironment`.
+- Swap in your own agent or model by supplying an `agent` override.
+- Add new tools or multi-step logic by extending the lifecycle.
+- Introduce new rewards to track novel metrics (e.g., reasoning chain length, safety checks).
+
+Once you are comfortable, use this folder as a template: copy it, rename the files to your domain, and replace the lifecycle, dataset, and rewards with your own logic.
+
+---
+
+## 10. Next steps
+
+- Read the top-level `AGENTS.md` for coding standards and testing expectations.
+- Inspect other environments in `environments/` for pattern variety (multi-turn, MCP tools, sandboxed Python execution).
+- Publish your environment by exporting a `load_environment` function and sharing the folder (or packaging it via `vf-install`).
+
+With these fundamentals you can build, evaluate, and iterate on new RL environments quickly using the `verifiers` ecosystem. Happy hacking!
