@@ -25,10 +25,9 @@ Make sure you have access to an AI SDK compatible model (e.g., OpenAI via `@ai-s
 cd verifiers-ts/environments/hangman
 pnpm install
 pnpm build          # compiles the TypeScript sources
-uv sync             # installs Python side dependencies for vf-eval
 ```
 
-These commands produce the compiled JS under `dist/` and ensure the Python CLI (`vf-eval`, `vf-tui`) can locate the environment.
+These commands produce the compiled JS under `dist/`; the `vf-eval` CLI bootstraps its own Python environment on demand.
 
 ---
 
@@ -42,7 +41,7 @@ This tutorial environment is intentionally small. Each file maps to a concept yo
 | `src/agent.ts` | **Agent** | Wraps `generateText` from AI SDK and registers the `guess_letter` tool. |
 | `src/rewards.ts` | **Rewards & Rubric** | Provides reward functions and weights that score each rollout. |
 | `src/index.ts` | **Environment factory** | Calls `createToolGameEnvironment` to stitch everything together. |
-| `hangman.py` | **Python bridge** | Exposes `load_environment()` so Python tooling can import the environment. |
+| `package.json` | **Manifest & CLI hooks** | Stores `verifiers` metadata (env id, eval defaults) and wires the `vf-eval` npm script. |
 
 Keep these responsibilities separate: the SDK handles the rollout loop, concurrency, and sandboxing; you provide domain-specific logic.
 
@@ -136,15 +135,16 @@ Swap out `createToolGameEnvironment` for `createSingleTurnEnvironment`, `createM
 
 ## 8. Run an evaluation
 
-After building the TypeScript bundle, you can evaluate the environment directly from Python using the CLI:
+After building the TypeScript bundle, run the npm-backed CLI. The SDK bridges into Python’s `vf-eval` under the hood:
 
 ```bash
 pnpm build
-uv run vf-eval hangman -n 5 -r 1 -m gpt-4.1-mini -s
+export OPENAI_API_KEY=sk-your-key
+pnpm vf-eval -- -n 5 -r 1 -m gpt-5-mini -s
 uv run vf-tui outputs   # browse results
 ```
 
-By default, `vf-eval` picks up `load_environment()` from `hangman.py`, which simply forwards to `createHangmanEnvironment`.
+`pnpm vf-eval` compiles the environment if needed, exports it through the TypeScript bridge, and invokes the Python evaluation loop without requiring any per-environment `.py` files.
 
 ---
 

@@ -3,6 +3,7 @@ import asyncio
 import importlib.resources
 import json
 import logging
+from pathlib import Path
 from typing import Any, Dict
 
 try:
@@ -20,7 +21,7 @@ DEFAULT_NUM_EXAMPLES = 5
 DEFAULT_ROLLOUTS_PER_EXAMPLE = 3
 
 
-def get_env_eval_defaults(env_id: str) -> Dict[str, Any]:
+def get_env_eval_defaults(env_id: str, env_dir_path: str | None = None) -> Dict[str, Any]:
     """Get eval config defaults from environment package's pyproject.toml.
 
     Returns dict with 'num_examples' and 'rollouts_per_example' keys if found,
@@ -61,6 +62,50 @@ def get_env_eval_defaults(env_id: str) -> Dict[str, Any]:
         logger.debug(
             f"Could not load eval defaults from {module_name} pyproject.toml: {e}"
         )
+
+    if defaults:
+        return defaults
+
+    if not env_dir_path:
+        return defaults
+
+    env_root = Path(env_dir_path).resolve()
+    search_names = [
+        env_id,
+        env_id.replace("-", "_"),
+    ]
+
+    for name in search_names:
+        package_path = env_root / name / "package.json"
+        if not package_path.is_file():
+            continue
+        try:
+            with package_path.open("r", encoding="utf-8") as f:
+                package_data = json.load(f)
+        except Exception as exc:
+            logger.debug(f"Failed to read package.json for {name}: {exc}")
+            continue
+
+        eval_cfg = package_data.get("verifiers", {}).get("eval", {})
+        if not isinstance(eval_cfg, dict):
+            continue
+
+        num_examples = eval_cfg.get("num_examples") or eval_cfg.get("numExamples")
+        if num_examples is not None:
+            defaults["num_examples"] = int(num_examples)
+
+        rollouts = (
+            eval_cfg.get("rollouts_per_example")
+            or eval_cfg.get("rolloutsPerExample")
+        )
+        if rollouts is not None:
+            defaults["rollouts_per_example"] = int(rollouts)
+
+        if defaults:
+            logger.debug(
+                f"Loaded eval defaults from {package_path}: {defaults}"
+            )
+            return defaults
 
     return defaults
 
@@ -222,7 +267,7 @@ def main():
     setup_logging("DEBUG" if args.verbose else "INFO")
 
     # apply defaults: CLI args take precedence, then env defaults, then global defaults
-    env_defaults = get_env_eval_defaults(args.env_id)
+    env_defaults = get_env_eval_defaults(args.env_id, args.env_dir_path)
     num_examples = (
         args.num_examples
         if args.num_examples is not None

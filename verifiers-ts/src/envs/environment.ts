@@ -3,6 +3,8 @@
  * Mirrors the Python Environment class structure
  */
 
+import path from "node:path";
+
 import type {
   Messages,
   State,
@@ -255,12 +257,15 @@ export abstract class Environment {
   protected getResultsPath(modelId: string, basePath: string = "./outputs"): string {
     // Generate UUID (8 characters, similar to Python)
     const uuid = this.generateUUID().substring(0, 8);
-    
+
     // Create env_model string: <env_id>--<model> (replace / with --)
     const envModelStr = `${this.envId || "unknown"}--${modelId.replace(/\//g, "--")}`;
-    
+
+    // Resolve base path relative to the environment cwd so Python writes to the same location
+    const resolvedBasePath = path.resolve(basePath);
+
     // Construct path: outputs/evals/<env_model>/<uuid>
-    return `${basePath}/evals/${envModelStr}/${uuid}`;
+    return path.join(resolvedBasePath, "evals", envModelStr, uuid);
   }
 
   /**

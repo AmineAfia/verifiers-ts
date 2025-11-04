@@ -7,22 +7,34 @@ from typing import (
     TypedDict,
 )
 
-from openai.types.chat.chat_completion import ChatCompletion
-from openai.types.chat.chat_completion_message_param import ChatCompletionMessageParam
+try:
+    from openai.types.chat.chat_completion import ChatCompletion
+    from openai.types.chat.chat_completion_message_param import (
+        ChatCompletionMessageParam,
+    )
 
-# openai types
-from openai.types.chat.chat_completion_message_tool_call import (
-    ChatCompletionMessageToolCall,  # noqa: F401
-)
-from openai.types.chat.chat_completion_role import ChatCompletionRole  # noqa: F401
-from openai.types.chat.chat_completion_tool_param import (
-    ChatCompletionToolParam,  # noqa: F401
-)
-from openai.types.completion import Completion
-from openai.types.shared_params import (  # noqa: F401
-    FunctionDefinition,
-    FunctionParameters,
-)
+    # openai types
+    from openai.types.chat.chat_completion_message_tool_call import (
+        ChatCompletionMessageToolCall,  # noqa: F401
+    )
+    from openai.types.chat.chat_completion_role import ChatCompletionRole  # noqa: F401
+    from openai.types.chat.chat_completion_tool_param import (
+        ChatCompletionToolParam,  # noqa: F401
+    )
+    from openai.types.completion import Completion
+    from openai.types.shared_params import (  # noqa: F401
+        FunctionDefinition,
+        FunctionParameters,
+    )
+except ImportError:  # pragma: no cover - optional dependency for TS bridge
+    ChatCompletion = Any  # type: ignore[assignment]
+    ChatCompletionMessageParam = Any  # type: ignore[assignment]
+    ChatCompletionMessageToolCall = Any  # type: ignore[assignment]
+    ChatCompletionRole = Any  # type: ignore[assignment]
+    ChatCompletionToolParam = Any  # type: ignore[assignment]
+    Completion = Any  # type: ignore[assignment]
+    FunctionDefinition = Any  # type: ignore[assignment]
+    FunctionParameters = Any  # type: ignore[assignment]
 from pydantic import BaseModel, Field
 
 # typing aliases

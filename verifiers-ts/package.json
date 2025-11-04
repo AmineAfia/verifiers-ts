@@ -7,9 +7,14 @@
   "type": "module",
 "files": [
     "dist",
+    "python-bridge",
     "README.md",
     "LICENSE"
 ],
+"bin": {
+    "vf-eval": "./dist/cli/vf-eval.js",
+    "vf-init": "./dist/cli/vf-init.js"
+},
 "exports": {
     ".": {
         "import": "./dist/index.js",

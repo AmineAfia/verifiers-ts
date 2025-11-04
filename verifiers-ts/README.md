@@ -27,6 +27,21 @@ npm run build
 
 ## Quick Start
 
+### Scaffold an Environment
+
+```bash
+pnpm dlx verifiers-ts vf-init my-environment
+cd my-environment
+pnpm install
+pnpm build
+pnpm vf-eval -n 1 -r 1
+```
+
+Customize the generated `src/index.ts`, dataset, and reward functions to match your task.
+
+> `vf-eval` automatically compiles your TypeScript, provisions a local `.vf-eval/` virtualenv, and exposes the environment to Python tooling—no manual `uv sync` required.
+> Provide `OPENAI_API_KEY` (or another provider key) so the default agent can make model calls.
+
 ### Minimal RL Environment
 
 ```typescript
@@ -213,7 +228,17 @@ Abstract base for Prime Intellect sandbox integration.
 
 ## Python Bridge
 
-TypeScript environments can be loaded via the Python bridge:
+Ship environments without writing Python glue. The `vf-eval` binary bundled with `verifiers-ts` automatically:
+
+- Ensures the environment is built (using `pnpm`/`npm` if needed)
+- Exposes it through the Python bridge
+- Invokes `uv run vf-eval` (or `python -m verifiers.scripts.eval` as a fallback)
+
+```bash
+npx vf-eval hangman -n 5 -r 1
+```
+
+If you need direct access from Python, you can still import the bridge manually:
 
 ```python
 from verifiers_ts_loader import load_environment

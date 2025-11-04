@@ -11,7 +11,7 @@ import {
   createHangmanDataset,
   generateWordList,
   type HangmanGameState,
-} from "./game";
+} from "./game.js";
 import {
   correctnessReward,
   efficiencyReward,
@@ -70,7 +70,7 @@ export async function createHangmanEnvironment(
     lifecycle: game,
     rewardFunction: rewardFunctions,
     rewardWeights: REWARD_WEIGHTS,
-    sandbox: options.sandbox ?? { enabled: true },
+    sandbox: options.sandbox ?? { enabled: false },
     envArgs: {
       max_wrong_guesses: maxWrongGuesses,
       max_turns: maxTurns,
@@ -81,4 +81,4 @@ export async function createHangmanEnvironment(
 
 export const loadEnvironment = createHangmanEnvironment;
 
-export type { HangmanGameState } from "./game";
+export type { HangmanGameState } from "./game.js";

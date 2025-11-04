@@ -212,18 +212,21 @@ export class HangmanGame implements ToolGameLifecycle {
   }
 
   private extractGuessFromToolCall(message: ChatMessage): string | null {
-    const calls = message.tool_calls;
-    if (!calls || calls.length === 0) {
+    const rawCalls =
+      (message as any).tool_calls ?? (message as any).toolCalls ?? [];
+    if (!rawCalls || rawCalls.length === 0) {
       return null;
     }
 
-    for (const toolCall of calls) {
-      if (toolCall.function?.name !== "guess_letter") {
+    for (const toolCall of rawCalls) {
+      const fnCall = (toolCall as any).function ?? toolCall;
+      const callName = fnCall?.name ?? fnCall?.toolName;
+      if (callName !== "guess_letter") {
         continue;
       }
 
       try {
-        const rawArgs = toolCall.function.arguments;
+        const rawArgs = fnCall?.arguments ?? fnCall?.args ?? {};
         const args =
           typeof rawArgs === "string"
             ? (JSON.parse(rawArgs) as { letter?: string })
@@ -292,8 +295,15 @@ function isValidLetter(letter: string): boolean {
 
 function extractGuessFromContent(message: ChatMessage): string | null {
   const content = message.content || "";
-  const letterMatch = content.match(/\b([A-Z])\b/i);
-  return letterMatch ? letterMatch[1].toUpperCase() : null;
+  const quotedLetter = content.match(/letter[^A-Za-z]*"([A-Za-z])"/i);
+  if (quotedLetter) {
+    return quotedLetter[1].toUpperCase();
+  }
+  const singleLetter = content
+    .split(/\s+/)
+    .map((part) => part.replace(/[^A-Za-z]/g, ""))
+    .find((part) => part.length === 1 && /[A-Za-z]/.test(part) && part.toUpperCase() !== "I");
+  return singleLetter ? singleLetter.toUpperCase() : null;
 }
 
 function getGameStatus(
