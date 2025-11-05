@@ -9,6 +9,7 @@ import type {
 } from "../types/index.js";
 import type { AISDKTool } from "../utils/tool-utils.js";
 import { getSandboxClient, type SandboxConfig } from "../utils/sandbox-client.js";
+import { extractExperimentalOutput } from "../utils/structured-output.js";
 
 export interface GenerateTextAgent {
   generateText: (
@@ -76,10 +77,24 @@ export class GenerateTextAdapter extends SingleTurnEnv {
     const callOptions = this.buildCallOptions(mergedTools, samplingArgs, apiKey, baseUrl);
 
     const result = await this.agent.generateText(coreMessages, callOptions);
+    const structuredOutput = extractExperimentalOutput(result);
 
-    const completionMessages = this.convertResultToMessages(result);
+    const completionMessages = this.convertResultToMessages(result, structuredOutput);
     resolvedState.completion = completionMessages;
     resolvedState.responses = [result];
+    if (!Array.isArray(resolvedState.raw_responses)) {
+      resolvedState.raw_responses = [];
+    }
+    resolvedState.raw_responses.push(result);
+
+    if (structuredOutput !== undefined) {
+      resolvedState.structured_output = structuredOutput;
+      if (!Array.isArray(resolvedState.structured_outputs)) {
+        resolvedState.structured_outputs = [];
+      }
+      resolvedState.structured_outputs.push(structuredOutput);
+    }
+
     resolvedState.toolCalls = result.toolCalls || [];
     resolvedState.toolResults = result.toolResults || [];
 
@@ -220,19 +235,36 @@ export class GenerateTextAdapter extends SingleTurnEnv {
     return state;
   }
 
-  protected convertResultToMessages(result: GenerateTextResult<any, any>): Messages {
+  protected convertResultToMessages(
+    result: GenerateTextResult<any, any>,
+    structuredOutput?: unknown
+  ): Messages {
     const converted = this.convertFromAISDKResponse(result);
     const choice = converted.choices[0];
     const message = choice.message;
+    const serializedStructured =
+      structuredOutput !== undefined ? JSON.stringify(structuredOutput) : undefined;
 
     if (!message || !message.content) {
-      return [];
+      if (!serializedStructured) {
+        return [];
+      }
+      return [
+        {
+          role: "assistant",
+          content: serializedStructured,
+          tool_calls: message?.tool_calls as any,
+        },
+      ] as Messages;
     }
+
+    const assistantContent =
+      message.content ?? serializedStructured ?? "";
 
     const messagesArray: any[] = [
       {
         role: "assistant",
-        content: message.content,
+        content: assistantContent,
         tool_calls: message.tool_calls as any,
       },
     ];

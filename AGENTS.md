@@ -96,6 +96,8 @@ uv add 'verifiers[all]'     # + training
 
 # Scaffold new environment
 vf-init new-environment
+# TypeScript minimal RL template
+vf-init new-environment --minimal-rl
 
 # Install + test
 vf-install new-environment

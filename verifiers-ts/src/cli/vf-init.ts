@@ -2,10 +2,18 @@
 
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
+import { createRequire } from "module";
+
+const require = createRequire(import.meta.url);
+const verifiersPackageJson = require("../../package.json") as { version?: string };
+
+type ScaffoldMode = "single-turn" | "minimal-rl";
 
 type ScaffoldOptions = {
   envName: string;
   targetDir: string;
+  mode: ScaffoldMode;
 };
 
 function toPascalCase(value: string): string {
@@ -34,7 +42,19 @@ function writeFile(filePath: string, contents: string) {
   fs.writeFileSync(filePath, contents, { encoding: "utf8" });
 }
 
-function createPackageJson({ envName }: ScaffoldOptions, pascalName: string): string {
+const CLI_DIR = path.dirname(fileURLToPath(import.meta.url));
+const PACKAGE_ROOT = path.resolve(CLI_DIR, "..");
+const WORKSPACE_MARKER = path.resolve(PACKAGE_ROOT, "../pnpm-workspace.yaml");
+
+const CORE_PACKAGE_NAME = "verifiers-ts";
+const CORE_VERSION = typeof verifiersPackageJson?.version === "string"
+  ? verifiersPackageJson.version
+  : "0.0.1";
+const CORE_VERSION_RANGE = fs.existsSync(WORKSPACE_MARKER)
+  ? "workspace:*"
+  : `^${CORE_VERSION}`;
+
+function createPackageJson({ envName, mode }: ScaffoldOptions, pascalName: string): string {
   const packageJson = {
     name: envName,
     version: "0.1.0",
@@ -43,10 +63,17 @@ function createPackageJson({ envName }: ScaffoldOptions, pascalName: string): st
     types: "./dist/index.d.ts",
     scripts: {
       build: "tsc",
-      "vf-eval": "node ./node_modules/verifiers-ts/dist/cli/vf-eval.js"
+      "vf-eval": `node ./node_modules/${CORE_PACKAGE_NAME}/dist/cli/vf-eval.js`
     },
     dependencies: {
-      "verifiers-ts": "^0.0.1"
+      [CORE_PACKAGE_NAME]: CORE_VERSION_RANGE,
+      ...(mode === "minimal-rl"
+        ? {
+            ai: "^5.0.86",
+            zod: "^3.25.6",
+            "@ai-sdk/openai": "^2.0.59"
+          }
+        : {})
     },
     devDependencies: {
       "@types/node": "^20.0.0",
@@ -89,7 +116,7 @@ function createTsConfig(): string {
   return `${JSON.stringify(config, null, 2)}\n`;
 }
 
-function createIndexTs(envName: string, pascalName: string): string {
+function createSingleTurnIndex(envName: string, pascalName: string): string {
   return `import { Rubric, SingleTurnEnv } from "verifiers-ts";
 
 type Example = {
@@ -134,7 +161,130 @@ export const loadEnvironment = create${pascalName}Environment;
 `;
 }
 
-function createReadme(envName: string, pascalName: string): string {
+function createMinimalRLIndex(envName: string): string {
+  return `import {
+  createRLEnvironment,
+  structuredOutputReward,
+  type StructuredOutputRewardContext,
+  type GenerateTextAgent,
+} from "verifiers-ts";
+import { generateText, Output, tool, type CoreMessage } from "ai";
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+
+const WeatherSummarySchema = z.object({
+  summary: z.string(),
+  sentiment: z.enum(["positive", "neutral", "negative"]),
+  confidence: z.number().min(0).max(1),
+});
+
+type WeatherSummary = z.infer<typeof WeatherSummarySchema>;
+
+const getCurrentWeather = tool({
+  description: "Get the current weather for a specific location.",
+  inputSchema: z.object({
+    location: z.string().describe("City and state, for example: Seattle, WA"),
+    preferredUnit: z.enum(["celsius", "fahrenheit"]).default("celsius").describe("Temperature unit to return."),
+  }),
+  async execute({ location, preferredUnit }: { location: string; preferredUnit: "celsius" | "fahrenheit" }) {
+    const temperatureC = 18;
+    const temperature = preferredUnit === "celsius" ? temperatureC : temperatureC * 1.8 + 32;
+    const unitLabel = preferredUnit === "celsius" ? "°C" : "°F";
+    return \`It is \${temperature} \${unitLabel} and sunny in \${location}.\`;
+  },
+});
+
+const weatherOutput = Output.object<WeatherSummary>({
+  schema: WeatherSummarySchema as any,
+});
+
+const weatherAgent: GenerateTextAgent = {
+  generateText: (messages: CoreMessage[], options: Record<string, unknown> = {}) => {
+    const { tools, ...rest } = options as { tools?: Record<string, unknown> };
+    return generateText({
+      model: openai("gpt-4o-mini") as any,
+      system:
+        "You are WeatherBot. When a user asks about the weather, call the getCurrentWeather tool and report the results clearly.",
+      temperature: 0,
+      messages,
+      ...(tools ? { tools: { getCurrentWeather, ...tools } } : { tools: { getCurrentWeather } }),
+      ...rest,
+    });
+  },
+  defaults: {
+    experimental_output: weatherOutput,
+  },
+  tools: { getCurrentWeather },
+};
+
+type DatasetExample = {
+  prompt: { role: "user"; content: string }[];
+  answer: string;
+};
+
+const dataset: DatasetExample[] = [
+  {
+    prompt: [
+      {
+        role: "user",
+        content: "What's the weather like in Seattle right now?",
+      },
+    ],
+    answer: "seattle",
+  },
+];
+
+const rewardFunction = structuredOutputReward<WeatherSummary>(
+  (context: StructuredOutputRewardContext<WeatherSummary>): number => {
+    const { structuredOutput, answer } = context;
+    if (!structuredOutput) {
+      return 0;
+    }
+    const { summary, confidence } = structuredOutput;
+    const summaryOk = summary.toLowerCase().includes(answer.toLowerCase());
+    return summaryOk ? confidence : 0;
+  }
+);
+
+export async function loadEnvironment() {
+  return createRLEnvironment({
+    agent: weatherAgent,
+    dataset,
+    rewardFunction,
+  });
+}
+`;
+}
+
+function createReadme(envName: string, pascalName: string, mode: ScaffoldMode): string {
+  if (mode === "minimal-rl") {
+    return `# ${pascalName} Environment
+
+Scaffold generated by verifiers-ts using the minimal RL template. It includes:
+
+- An AI SDK agent with a tool and structured output schema
+- A tiny dataset array (replace with your own)
+- A reward powered by \`structuredOutputReward\`
+
+## Quick start
+
+\`\`\`bash
+cd ${envName}
+pnpm install
+pnpm build
+pnpm vf-eval -n 1 -r 1
+\`\`\`
+
+Set \`OPENAI_API_KEY\` (or pass \`--api-key\` to \`vf-eval\`) before running evaluations.
+
+## Next steps
+
+1. Swap the dataset prompt/answer with your task.
+2. Refine the reward or combine it with other helpers from \`verifiers-ts/rewards\`.
+3. Add additional tools or agent defaults as needed.
+`;
+  }
+
   return `# ${pascalName} Environment
 
 Scaffold generated by verifiers-ts. Update the prompt, dataset, and rewards to fit your task.
@@ -158,6 +308,13 @@ pnpm vf-eval -n 1 -r 1
 `;
 }
 
+function createIndexTs(options: ScaffoldOptions, pascalName: string): string {
+  if (options.mode === "minimal-rl") {
+    return createMinimalRLIndex(options.envName);
+  }
+  return createSingleTurnIndex(options.envName, pascalName);
+}
+
 function scaffold(options: ScaffoldOptions) {
   const pascalName = toPascalCase(options.envName);
   ensureEmptyDir(options.targetDir);
@@ -167,17 +324,37 @@ function scaffold(options: ScaffoldOptions) {
     createPackageJson(options, pascalName)
   );
   writeFile(path.join(options.targetDir, "tsconfig.json"), createTsConfig());
-  writeFile(path.join(options.targetDir, "README.md"), createReadme(options.envName, pascalName));
+  writeFile(path.join(options.targetDir, "README.md"), createReadme(options.envName, pascalName, options.mode));
   writeFile(
     path.join(options.targetDir, "src", "index.ts"),
-    createIndexTs(options.envName, pascalName)
+    createIndexTs(options, pascalName)
   );
 }
 
 function main() {
-  const [envName] = process.argv.slice(2);
+  const rawArgs = process.argv.slice(2);
+  if (rawArgs.length === 0) {
+    console.error("Usage: vf-init <env-name> [--minimal-rl]");
+    process.exit(1);
+  }
+
+  let envName: string | null = null;
+  const flags = new Set<string>();
+  for (const arg of rawArgs) {
+    if (arg.startsWith("--")) {
+      flags.add(arg);
+      continue;
+    }
+    if (!envName) {
+      envName = arg;
+    } else {
+      console.error(`Unexpected argument: ${arg}`);
+      process.exit(1);
+    }
+  }
+
   if (!envName) {
-    console.error("Usage: vf-init <env-name>");
+    console.error("Environment name is required.");
     process.exit(1);
   }
 
@@ -188,10 +365,16 @@ function main() {
   }
 
   const targetDir = path.resolve(process.cwd(), safeName);
-  scaffold({ envName: safeName, targetDir });
+  const mode: ScaffoldMode =
+    flags.has("--minimal-rl") || flags.has("--minimal") ? "minimal-rl" : "single-turn";
+
+  scaffold({ envName: safeName, targetDir, mode });
 
   console.log(`Created TypeScript environment scaffold at ${targetDir}`);
   console.log("Next steps: pnpm install && pnpm build && pnpm vf-eval -n 1 -r 1");
+  if (mode === "minimal-rl") {
+    console.log("Tip: export OPENAI_API_KEY before running vf-eval.");
+  }
 }
 
 main();

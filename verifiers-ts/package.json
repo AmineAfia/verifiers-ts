@@ -13,7 +13,8 @@
 ],
 "bin": {
     "vf-eval": "./dist/cli/vf-eval.js",
-    "vf-init": "./dist/cli/vf-init.js"
+    "vf-init": "./dist/cli/vf-init.js",
+    "vf-doctor": "./dist/cli/vf-doctor.js"
 },
 "exports": {
     ".": {

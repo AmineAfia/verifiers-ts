@@ -27,6 +27,18 @@ npm run build
 
 ## Quick Start
 
+### Scaffold a Minimal RL Environment
+
+```bash
+pnpm dlx verifiers-ts vf-init weather-bot --minimal-rl
+cd weather-bot
+pnpm install
+pnpm build
+pnpm vf-eval -n 1 -r 1
+```
+
+This template matches the screenshot example: a tool-enabled agent, tiny dataset, and a reward built with `structuredOutputReward`. Replace the prompt, tweak the agent defaults, and you’re ready to evaluate. Remember to export `OPENAI_API_KEY` (or pass `--api-key` to `vf-eval`).
+
 ### Scaffold an Environment
 
 ```bash
@@ -118,6 +130,77 @@ const env = await createRLEnvironment({
     const normalized = text.toLowerCase();
     return normalized.includes(answer) && normalized.includes("weather") ? 1 : 0;
   },
+});
+```
+
+### Structured Output Rewards
+
+The AI SDK can return validated JSON alongside text responses by enabling the experimental structured output mode with a Zod schema. Forward the `experimental_output` setting from your agent and use `structuredOutputReward` to score against the parsed object:
+
+```typescript
+import { generateText, Output } from "ai";
+import { z } from "zod";
+import { openai } from "@ai-sdk/openai";
+import {
+  createRLEnvironment,
+  structuredOutputReward,
+  type StructuredOutputRewardContext,
+} from "verifiers-ts";
+
+const summarizeAgent = {
+  generateText: (messages: any, options: Record<string, unknown> = {}) => {
+    const { tools, ...rest } = options as {
+      tools?: Record<string, unknown>;
+    };
+
+    return generateText({
+      model: openai("gpt-4o") as any,
+      system: "Summarize feedback and estimate sentiment.",
+      temperature: 0,
+      messages,
+      ...(tools ? { tools } : {}),
+      ...rest,
+    });
+  },
+  defaults: {
+    experimental_output: Output.object({
+      schema: z.object({
+        sentiment: z.enum(["positive", "neutral", "negative"]),
+        summary: z.string(),
+        confidence: z.number().min(0).max(1),
+      }),
+    }),
+  },
+};
+
+type SentimentOutput = {
+  sentiment: "positive" | "neutral" | "negative";
+  summary: string;
+  confidence: number;
+};
+
+const env = await createRLEnvironment({
+  agent: summarizeAgent,
+  dataset: [
+    {
+      prompt: [
+        {
+          role: "user",
+          content: "Customer said: \"Absolutely loved the new UI overhaul!\"",
+        },
+      ],
+      answer: "positive",
+    },
+  ],
+  rewardFunction: structuredOutputReward<SentimentOutput>(
+    ({ structuredOutput, answer }: StructuredOutputRewardContext<SentimentOutput>) => {
+      if (!structuredOutput) {
+        return 0;
+      }
+      const matches = structuredOutput.sentiment === answer;
+      return matches ? structuredOutput.confidence : 0;
+    }
+  ),
 });
 ```
 

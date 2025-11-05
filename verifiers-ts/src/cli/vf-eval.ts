@@ -178,6 +178,20 @@ if (!childEnv.UV_CACHE_DIR) {
   }
 }
 
+if (!childEnv.UV_PYTHON_INSTALL_DIR) {
+  try {
+    const installDir = path.join(pythonCwd, ".uv-python");
+    fs.mkdirSync(installDir, { recursive: true });
+    childEnv.UV_PYTHON_INSTALL_DIR = installDir;
+  } catch (error) {
+    if (process.env.VERIFIERS_TS_DEBUG) {
+      console.warn(
+        `[vf-eval] Failed to prepare UV Python install dir: ${(error as Error).message}`
+      );
+    }
+  }
+}
+
 function commandExists(command: string): boolean {
   try {
     const result = spawnSync(command, ["--version"], {
@@ -211,6 +225,79 @@ function getVenvPythonPath(venvDir: string): string {
     process.platform === "win32" ? "Scripts" : "bin",
     process.platform === "win32" ? "python.exe" : "python"
   );
+}
+
+function hasLzmaSupport(pythonCommand: string): boolean {
+  const check = spawnSync(
+    pythonCommand,
+    ["-c", "import lzma"],
+    { stdio: "ignore", env: childEnv }
+  );
+  return check.status === 0;
+}
+
+function tryResolveUvPython(): string | undefined {
+  if (!commandExists("uv")) {
+    return undefined;
+  }
+
+  const find = spawnSync(
+    "uv",
+    ["python", "find", "--managed-python", "3.11"],
+    { env: childEnv, encoding: "utf8" }
+  );
+  if (find.status === 0) {
+    const candidate = find.stdout.trim();
+    if (candidate && hasLzmaSupport(candidate)) {
+      return candidate;
+    }
+  }
+
+  const install = spawnSync(
+    "uv",
+    ["python", "install", "3.11"],
+    { env: childEnv, stdio: "inherit" }
+  );
+  if (install.status !== 0) {
+    return undefined;
+  }
+
+  const locate = spawnSync(
+    "uv",
+    ["python", "find", "--managed-python", "3.11"],
+    { env: childEnv, encoding: "utf8" }
+  );
+  if (locate.status === 0) {
+    const candidate = locate.stdout.trim();
+    if (candidate && hasLzmaSupport(candidate)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function ensurePythonHasLzma(basePython: string): string {
+  if (hasLzmaSupport(basePython)) {
+    return basePython;
+  }
+
+  console.warn(
+    `[vf-eval] Python interpreter "${basePython}" is missing lzma support.`
+  );
+
+  const uvPython = tryResolveUvPython();
+  if (uvPython) {
+    console.warn(`[vf-eval] Using uv-managed Python at ${uvPython}.`);
+    return uvPython;
+  }
+
+  console.error(
+    "[vf-eval] Unable to locate a Python interpreter with lzma support. " +
+      "Reinstall Python with lzma enabled (e.g. `brew install xz` then `pyenv install --patch ...`) " +
+      "or set VERIFIERS_TS_USE_UV=1 to let uv manage Python."
+  );
+  process.exit(1);
 }
 
 function ensurePythonEnvironment(basePython: string): string {
@@ -250,7 +337,7 @@ let pythonInvoker: { command: string; args: string[] };
 if (preferUv && commandExists("uv")) {
   pythonInvoker = { command: "uv", args: ["run", "vf-eval"] };
 } else {
-  const basePython = resolvePythonCommand();
+  const basePython = ensurePythonHasLzma(resolvePythonCommand());
   let pythonCommand = basePython;
   try {
     pythonCommand = ensurePythonEnvironment(basePython);

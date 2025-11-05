@@ -47,6 +47,10 @@ export type {
   CommandResult,
   SandboxClient,
 } from "./utils/sandbox-client.js";
+export {
+  extractExperimentalOutput,
+  getStructuredOutputFromState,
+} from "./utils/structured-output.js";
 
 // Agents (AI SDK Integration)
 export {
@@ -86,9 +90,11 @@ export {
   toolUseReward,
   formatReward,
   stepCountReward,
+  structuredOutputReward,
   combinedReward,
   similarityReward,
 } from "./rewards/agent-rewards.js";
+export type { StructuredOutputRewardContext } from "./rewards/agent-rewards.js";
 
 // Datasets
 export {

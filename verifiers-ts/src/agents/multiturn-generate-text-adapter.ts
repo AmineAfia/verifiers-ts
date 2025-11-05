@@ -8,6 +8,7 @@ import type {
 } from "../types/index.js";
 import type { AISDKTool } from "../utils/tool-utils.js";
 import { getSandboxClient, type SandboxConfig } from "../utils/sandbox-client.js";
+import { extractExperimentalOutput } from "../utils/structured-output.js";
 import type { GenerateTextAgent } from "./generate-text-adapter.js";
 
 export interface MultiTurnGenerateTextAdapterOptions extends MultiTurnEnvOptions {
@@ -104,6 +105,23 @@ export abstract class MultiTurnGenerateTextAdapter extends MultiTurnEnv {
     const callOptions = this.buildCallOptions(mergedTools, samplingArgs, apiKey, baseUrl);
 
     const result = await this.agent.generateText(coreMessages, callOptions);
+    const structuredOutput = extractExperimentalOutput(result);
+
+    if (this.currentState) {
+      if (!Array.isArray(this.currentState.raw_responses)) {
+        this.currentState.raw_responses = [];
+      }
+      this.currentState.raw_responses.push(result);
+
+      if (structuredOutput !== undefined) {
+        this.currentState.structured_output = structuredOutput;
+        if (!Array.isArray(this.currentState.structured_outputs)) {
+          this.currentState.structured_outputs = [];
+        }
+        this.currentState.structured_outputs.push(structuredOutput);
+      }
+    }
+
     return this.convertFromAISDKResponse(result);
   }
 
