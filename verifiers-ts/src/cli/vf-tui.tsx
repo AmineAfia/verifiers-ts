@@ -162,6 +162,50 @@ function flattenTree(nodes: TreeNode[], expandedOnly: boolean = true): TreeNode[
   return result;
 }
 
+function PrimeIntellectLogo() {
+  // ASCII art logo matching the PRIME Intellect design exactly
+  // PRIME: blocky, angular, pixelated futuristic font (all caps)
+  const primeAscii = [
+    "██████╗ ██████╗ ██╗███╗   ███╗███████╗",
+    "██╔══██╗██╔══██╗██║████╗ ████║██╔════╝",
+    "██████╔╝██████╔╝██║██╔████╔██║█████╗  ",
+    "██╔═══╝ ██╔══██╗██║██║╚██╔╝██║██╔══╝  ",
+    "██║     ██║  ██║██║██║ ╚═╝ ██║███████╗",
+    "╚═╝     ╚═╝  ╚═╝╚═╝╚═╝     ╚═╝╚══════╝"
+  ];
+  
+  // Intellect: italicized serif style (capital I, rest lowercase)
+  // Simulated italic by progressively offsetting each line to create slant effect
+  const intellectAscii = [
+    " ██╗███╗   ██╗████████╗███████╗██╗     ███████╗ ██████╗████████╗",
+    "  ██║████╗  ██║╚══██╔══╝██╔════╝██║     ██╔════╝██╔════╝╚══██╔══╝",
+    "   ██║██╔██╗ ██║   ██║   █████╗  ██║     █████╗  ██║        ██║   ",
+    "    ██║██║╚██╗██║   ██║   ██╔══╝  ██║     ██╔══╝  ██║        ██║   ",
+    "     ██║██║ ╚████║   ██║   ███████╗███████╗███████╗╚██████╗   ██║   ",
+    "      ╚═╝╚═╝  ╚═══╝   ╚═╝   ╚══════╝╚══════╝╚══════╝ ╚═════╝   ╚═╝   "
+  ];
+
+  return (
+    <Box flexDirection="column">
+      <Box flexDirection="row" alignItems="flex-start">
+        <Box flexDirection="column" marginRight={1}>
+          {primeAscii.map((line, idx) => (
+            <Text key={idx}>{line}</Text>
+          ))}
+        </Box>
+        <Box flexDirection="column">
+          {intellectAscii.map((line, idx) => (
+            <Text key={idx}>{line}</Text>
+          ))}
+        </Box>
+        <Box flexDirection="column" justifyContent="center" marginLeft={1} paddingTop={2}>
+          <Text dimColor>(not official)</Text>
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+
 function loadRunResults(run: RunInfo): Record<string, any>[] {
   const resultsPath = path.join(run.path, "results.jsonl");
   const results: Record<string, any>[] = [];
@@ -505,7 +549,7 @@ function VerifiersTUI({ outputsDir }: VerifiersTUIProps) {
   return (
     <Box flexDirection="column" height="100%">
       <Box borderStyle="round" borderColor="cyan" padding={1} marginBottom={1} flexShrink={0}>
-        <Text bold>Evaluation Results</Text>
+        <PrimeIntellectLogo />
       </Box>
       <Box flexGrow={1} flexShrink={1}>
         <TreeView
