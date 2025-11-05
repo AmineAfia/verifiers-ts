@@ -1,260 +1,324 @@
 # verifiers-ts
 
-> ⚠️ this lib is still WIP, look at the [hangmnan code](https://github.com/AmineAfia/verifiers-ts/tree/main/verifiers-ts/environments/hangman) for a full example and open issues for any questions
+Build reinforcement learning environments for language models with TypeScript. Evaluate and train AI agents through interactive tasks, tool use, and multi-turn conversations.
 
-TypeScript implementation of the verifiers framework for building RL environments and evaluations with AI SDK integration.
+## What is verifiers-ts?
 
-## Overview
+`verifiers-ts` is a TypeScript framework for creating RL (reinforcement learning) environments that let you:
 
-`verifiers-ts` provides the same core functionality as the Python `verifiers` library, enabling you to:
+- **Evaluate** how well language models perform on specific tasks
+- **Train** models using reinforcement learning with custom reward functions
+- **Build** interactive environments with tools, multi-turn conversations, and sandboxed code execution
+- **Measure** performance with flexible, multi-criteria reward systems
 
-- Define custom interaction protocols between models and environments
-- Build agents, multi-turn conversations, tool-augmented reasoning, and interactive games
-- Create reusable evaluation environments with multi-criteria reward functions
-- Integrate with [AI SDK](https://sdk.vercel.ai/docs) for model inference and native tool calling
-
-## Installation
-
-```bash
-npm install verifiers-ts
-```
-
-Or if developing locally:
-
-```bash
-cd verifiers-ts
-npm install
-npm run build
-```
+Think of it as a testing framework for AI agents—but instead of just checking if code runs, you're measuring how well models solve problems, use tools, and interact with their environment.
 
 ## Quick Start
 
-### Minimal RL Environment
+Get started in under 2 minutes by scaffolding a minimal RL environment:
+
+```bash
+# 1. Authenticate with Prime Intellect (for sandbox features)
+prime login
+
+# 2. Create a new environment from template
+npx -p verifiers-ts vf-init weather-bot --minimal-rl
+
+# 3. Follow the setup instructions
+cd weather-bot
+pnpm install
+pnpm build
+
+# 4. Run your first evaluation
+pnpm vf-eval -n 1 -r 1 -s
+```
+
+That's it! You now have a working RL environment. The scaffold includes:
+
+- ✅ An AI agent that can call tools
+- ✅ A sample dataset with prompts and answers
+- ✅ A reward function to evaluate performance
+- ✅ Sandbox support for safe code execution
+
+**Before running evaluations**, make sure you have an API key set:
+
+```bash
+export OPENAI_API_KEY="your-key-here"
+# Or pass it directly: pnpm vf-eval --api-key "your-key-here"
+```
+
+> 💡 **Tip**: The `-s` flag saves results to `outputs/` so you can explore them later with `pnpm vf-tui`.
+
+## Understanding RL Environments
+
+An RL environment in `verifiers-ts` is like a training gym for AI models. It defines the rules, provides the tools, and scores performance. Here's how the pieces fit together:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    RL Environment                           │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌──────────────┐         ┌──────────────┐                │
+│  │   Dataset    │────────▶│    Agent     │                │
+│  │              │  prompt │              │                │
+│  │ • Examples   │         │ • AI Model   │                │
+│  │ • Answers    │         │ • Tools      │                │
+│  └──────────────┘         └──────┬───────┘                │
+│                                   │                         │
+│                                   │ completion               │
+│                                   ▼                         │
+│                          ┌──────────────┐                  │
+│                          │   Reward     │                  │
+│                          │   Function   │                  │
+│                          │              │                  │
+│                          │ • Score: 0-1 │                  │
+│                          │ • Criteria   │                  │
+│                          └──────────────┘                  │
+│                                   │                         │
+│                                   │ score                   │
+│                                   ▼                         │
+│                          ┌──────────────┐                  │
+│                          │   Results    │                  │
+│                          │              │                  │
+│                          │ • Metrics    │                  │
+│                          │ • Logs       │                  │
+│                          └──────────────┘                  │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### The Four Core Components
+
+Every RL environment needs these four elements:
+
+#### 1. **Agent** 🤖
+The AI model that will be evaluated or trained. It wraps a language model (like GPT-4) and optionally provides tools it can use.
 
 ```typescript
 import { generateText, tool } from "ai";
-import { z } from "zod";
 import { openai } from "@ai-sdk/openai";
-import { createRLEnvironment } from "verifiers-ts";
+import type { GenerateTextAgent } from "verifiers-ts";
 
-const getCurrentWeather = tool({
-  description: "Get the current weather for a specific location.",
-  parameters: z.object({
-    location: z
-      .string()
-      .describe("City and state, for example: Seattle, WA"),
-    unit: z
-      .enum(["celsius", "fahrenheit"])
-      .describe("Temperature unit to return.")
-      .optional(),
-  }),
-  execute: async ({ location, unit }) => {
-    const preferredUnit = unit ?? "celsius";
-    const temperature = preferredUnit === "celsius" ? 18 : 64;
-    return `It is ${temperature}°${preferredUnit === "celsius" ? "C" : "F"} and sunny in ${location}.`;
-  },
-});
-
-const weatherAgent = {
-  generateText: (messages: any, options: Record<string, unknown> = {}) => {
-    const { tools = {}, ...rest } = options as {
-      tools?: Record<string, ReturnType<typeof tool>>;
-    };
-
+const myAgent: GenerateTextAgent = {
+  generateText: (messages, options = {}) => {
     return generateText({
-      model: openai("gpt-4o-mini") as any,
-      system:
-        "You are WeatherBot. When a user asks about the weather, call the getCurrentWeather tool and report the results clearly.",
-      temperature: 0,
-      tools: { getCurrentWeather, ...tools },
+      model: openai("gpt-4o-mini"),
+      system: "You are a helpful assistant.",
       messages,
-      ...rest,
+      tools: { /* your tools */ },
+      ...options,
     });
   },
-  tools: { getCurrentWeather },
+  tools: { /* optional tool map */ },
 };
+```
+
+**What it does**: Takes prompts from the dataset, generates responses using the AI model, and can call tools when needed.
+
+#### 2. **Dataset** 📊
+A collection of examples that define the task. Each example has a prompt (what you ask the model) and an optional answer (what you expect).
+
+```typescript
+const dataset = [
+  {
+    prompt: [
+      { role: "user", content: "What is 2+2?" }
+    ],
+    answer: "4",  // Used by reward functions
+  },
+  {
+    prompt: [
+      { role: "user", content: "What's the weather in Seattle?" }
+    ],
+    answer: "seattle",
+  },
+  // ... more examples
+];
+```
+
+**What it does**: Provides the test cases or training examples for your environment. The model will be evaluated on each example.
+
+#### 3. **Reward Function** 🎯
+A function that evaluates the model's output and returns a score (typically 0.0 to 1.0). This is how you measure success.
+
+```typescript
+import { structuredOutputReward } from "verifiers-ts";
+import { z } from "zod";
+
+// Option 1: Use built-in rewards
+const reward = structuredOutputReward({
+  schema: z.object({
+    location: z.string(),
+    temperature: z.number(),
+  }),
+});
+
+// Option 2: Write a custom reward
+const reward = async (completion, answer, state) => {
+  const text = extractText(completion);
+  return text.includes(answer) ? 1.0 : 0.0;
+};
+```
+
+**What it does**: Analyzes the model's completion and returns a score. Higher scores = better performance. You can combine multiple reward functions with different weights.
+
+#### 4. **Environment Configuration** ⚙️
+Puts it all together into a runnable environment.
+
+```typescript
+import { createRLEnvironment } from "verifiers-ts";
 
 const env = await createRLEnvironment({
-  agent: weatherAgent,
-  dataset: [
-    {
-      prompt: [
-        {
-          role: "user",
-          content: "What's the weather like in Seattle right now?",
-        },
-      ],
-      answer: "seattle",
-    },
-  ],
-  rewardFunction: (completion, answer) => {
-    const text = Array.isArray(completion)
-      ? completion
-          .filter(
-            (msg) =>
-              typeof msg === "object" &&
-              msg !== null &&
-              "role" in msg &&
-              msg.role === "assistant"
-          )
-          .map((msg) => (msg as { content?: string }).content ?? "")
-          .join(" ")
-      : typeof completion === "string"
-      ? completion
-      : "";
-    const normalized = text.toLowerCase();
-    return normalized.includes(answer) && normalized.includes("weather") ? 1 : 0;
-  },
+  agent: myAgent,
+  dataset: myDataset,
+  rewardFunction: myReward,
+  rewardWeights: [1.0],  // Optional: weights for multiple rewards
+  sandbox: { enabled: true },  // Optional: enable code execution
 });
 ```
 
-### Single-Turn Environment
+**What it does**: Combines all components into a single environment that can be evaluated, trained, or integrated with RL training loops.
+
+## How It Works: The Evaluation Flow
+
+When you run an evaluation, here's what happens:
+
+1. **Load Environment**: The environment reads your dataset and configuration
+2. **Iterate Examples**: For each example in the dataset:
+   - Extract the prompt
+   - Send it to the agent
+   - Agent generates a response (possibly using tools)
+   - Response is evaluated by the reward function
+   - Score is recorded
+3. **Collect Results**: All scores and completions are saved
+4. **Analyze**: You can explore results with `vf-tui` or analyze programmatically
+
+```
+Example 1: "What's 2+2?"
+  → Agent: "The answer is 4"
+  → Reward: 1.0 ✅
+
+Example 2: "What's the weather?"
+  → Agent: [calls getCurrentWeather tool]
+  → Agent: "It's 18°C and sunny in Seattle"
+  → Reward: 1.0 ✅
+```
+
+## Common Patterns
+
+### Single-Turn Q&A
+For tasks where the model gives one answer:
 
 ```typescript
-import { SingleTurnEnv, Rubric, Parser } from "verifiers-ts";
-
-function correctAnswer(params: {
-  completion: any;
-  answer: string;
-}): number {
-  const text = extractText(params.completion);
-  return text.trim() === params.answer.trim() ? 1.0 : 0.0;
-}
-
-const rubric = new Rubric({
-  funcs: [correctAnswer],
-  weights: [1.0],
-});
+import { SingleTurnEnv, Rubric } from "verifiers-ts";
 
 const env = new SingleTurnEnv({
   dataset: myDataset,
-  systemPrompt: "Solve step by step",
-  rubric,
+  systemPrompt: "Answer accurately.",
+  rubric: new Rubric({
+    funcs: [correctnessReward],
+    weights: [1.0],
+  }),
 });
-
-const results = await env.evaluate(
-  "gpt-4",
-  {},
-  10, // numExamples
-  1,  // rolloutsPerExample
-  true, // scoreRollouts
-  32, // maxConcurrent
-  undefined, // maxConcurrentGeneration
-  undefined, // maxConcurrentScoring
-  process.env.OPENAI_API_KEY
-);
 ```
 
-### Tool-Using Environment
+### Tool-Using Agents
+For agents that need to call functions:
 
 ```typescript
-import { ToolEnv, defineTool } from "verifiers-ts";
-import { z } from "zod";
+import { createRLEnvironment } from "verifiers-ts";
 
-const calculator = defineTool(
-  "calculate",
-  "Perform arithmetic",
-  z.object({
-    expression: z.string(),
-  }),
-  async (args) => {
-    return eval(args.expression); // Use proper parser in production
-  }
-);
-
-const env = new ToolEnv({
-  tools: [calculator],
-  maxTurns: 10,
+const env = await createRLEnvironment({
+  agent: toolEnabledAgent,
+  dataset: myDataset,
+  rewardFunction: [
+    correctnessReward,
+    toolUseReward,  // Reward proper tool usage
+  ],
+  rewardWeights: [0.8, 0.2],
 });
-
-// AI SDK automatically handles tool calling loop
-const results = await env.evaluate("gpt-4", {}, 10);
 ```
+
+### Multi-Turn Conversations
+For interactive tasks like games or simulations:
+
+```typescript
+import { createToolGameEnvironment } from "verifiers-ts";
+
+const env = await createToolGameEnvironment({
+  agent: myAgent,
+  dataset: myDataset,
+  rewardFunction: myReward,
+  lifecycle: {
+    setupState: async (state) => { /* initialize game */ },
+    isCompleted: async (messages, state) => { /* check win/loss */ },
+    onTurn: async ({ messages, state }) => { /* process turn */ },
+  },
+  maxTurns: 20,
+});
+```
+
+## Next Steps
+
+Now that you understand the basics:
+
+1. **Explore the scaffold**: Look at the generated `src/index.ts` in your `weather-bot` project
+2. **Customize your dataset**: Replace the example prompts with your own task
+3. **Refine rewards**: Adjust the reward function to match your evaluation criteria
+4. **Add tools**: Define more tools your agent can use
+5. **Run evaluations**: Use `pnpm vf-eval -n 10 -r 3` to test multiple examples
+
+### Explore Results
+
+After running evaluations, browse them interactively:
+
+```bash
+pnpm vf-tui
+```
+
+This opens a terminal UI where you can:
+- Navigate through evaluation runs
+- View prompts, completions, and rewards
+- Compare different runs and models
+- Drill down into individual examples
+
+### Learn More
+
+- **Examples**: See `verifiers-ts/environments/hangman` for a complete multi-turn game example
+- **API Reference**: Check out the TypeScript types and exported functions
+- **Python Integration**: Use `vf-eval` and `vf-tui` from Python projects too
 
 ## Architecture
 
-The library mirrors the Python verifiers structure:
+`verifiers-ts` provides several environment types:
 
-- **Environments**: Base `Environment` class with `MultiTurnEnv`, `SingleTurnEnv`, `ToolEnv`, `StatefulToolEnv`, and `SandboxEnv` variants
-- **Rubrics**: Weighted reward functions for evaluation
-- **Parsers**: Extract structured information (`Parser`, `ThinkParser`, `XMLParser`)
-- **Tools**: Native AI SDK tool integration using `tool()` function from 'ai' package
-- **AI SDK Integration**: Uses `generateText` for model calls and automatic tool calling
+- **`createRLEnvironment`**: General-purpose factory for RL environments
+- **`SingleTurnEnv`**: Simple Q&A tasks
+- **`MultiTurnEnv`**: Custom multi-turn protocols
+- **`ToolEnv`**: Native AI SDK tool calling
+- **`StatefulToolEnv`**: Tools requiring dynamic state
+- **`SandboxEnv`**: Code execution in isolated environments
+- **`createToolGameEnvironment`**: Factory for tool-driven games
 
-## Key Features
-
-### AI SDK Integration
-
-- **Native Tool Calling**: Tools use AI SDK's `tool()` function with Zod schemas
-- **Automatic Loop Handling**: AI SDK manages tool execution loops with `stopWhen` conditions
-- **Type-Safe Tools**: Zod schemas provide runtime validation and TypeScript types
-- **Structured Outputs**: Support for `generateObject` when needed
-
-### Compatibility
-
-- **Results Format**: Saves results in JSONL format compatible with Python `vf-tui`
-- **Python Bridge**: Python adapter available for `vf-eval`/`vf-tui` CLI integration
-- **State Management**: Same state structure as Python verifiers
-
-## Environment Types
-
-### SingleTurnEnv
-For Q&A tasks requiring a single model response.
-
-### MultiTurnEnv
-Base class for custom interaction protocols. Override `is_completed` and `env_response`.
-
-### ToolEnv
-Uses AI SDK's native tool calling. Tools are defined with `defineTool()` and automatically handled by AI SDK.
-
-### StatefulToolEnv
-Extends `ToolEnv` for tools requiring dynamic state (e.g., sandbox IDs).
-
-### SandboxEnv
-Abstract base for Prime Intellect sandbox integration.
-
-## Python Bridge
-
-TypeScript environments can be loaded via the Python bridge:
-
-```python
-from verifiers_ts_loader import load_environment
-
-env = load_environment("example-single-turn")
-results = await env.evaluate(
-    client=async_client,
-    model="gpt-4",
-    num_examples=100
-)
-```
-
-## Examples
-
-See `environments/` directory for example implementations:
-- `example-single-turn`: Basic Q&A environment
-- `example-tool-use`: Tool calling with AI SDK
+All environments integrate seamlessly with [AI SDK](https://sdk.vercel.ai/docs) for model inference and tool calling.
 
 ## Development
 
+This is a monorepo managed with [Turborepo](https://turbo.build):
+
 ```bash
 # Install dependencies
-npm install
+pnpm install
 
-# Build
-npm run build
+# Build all packages
+pnpm turbo run build
 
-# Run tests (when implemented)
-npm test
+# Run tests
+pnpm turbo run test
 
 # Lint
-npm run lint
+pnpm turbo run lint
 ```
-
-## Status
-
-✅ **Core Complete** - All base classes and AI SDK integration implemented
-🔄 **In Progress** - Python bridge refinement
-📝 **Pending** - Comprehensive tests and examples
 
 ## License
 
