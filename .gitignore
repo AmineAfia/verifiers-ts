@@ -1,5 +1,7 @@
 # env 
 .venv/
+.vf-eval/
+.uv-cache/
 venv/
 env/
 .env

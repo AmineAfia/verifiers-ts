@@ -6,26 +6,36 @@
 import { tool, type Tool } from "ai";
 import { z } from "zod";
 
+// AI SDK Tool type - accepts any Tool instance from AI SDK
+// Using `any` for type parameters to allow tools with specific input/output types
+// This is necessary because AI SDK's tool() function returns strongly-typed Tool instances
+// like Tool<{ letter: string; }, string>, and TypeScript's generic types are invariant
+// so we need to use `any` to accept all Tool variants
 export type AISDKTool = Tool<any, any>;
 
-export interface ToolDefinition {
+// Generic tool definition interface
+// Using any for the generic constraint to allow specific ZodObject types
+export interface ToolDefinition<T extends z.ZodObject<any> = z.ZodObject<any>> {
   name: string;
   description: string;
-  inputSchema: z.ZodObject<any>;
-  execute: (args: z.infer<z.ZodObject<any>>) => any | Promise<any>;
+  inputSchema: T;
+  execute: (args: z.infer<T>) => unknown | Promise<unknown>;
 }
 
 /**
  * Create an AI SDK tool from a tool definition
  */
-export function createAISDKTool(def: ToolDefinition): AISDKTool {
+export function createAISDKTool<T extends z.ZodObject<any>>(
+  def: ToolDefinition<T>
+): AISDKTool {
   // AI SDK 5.0 uses inputSchema instead of parameters
   // The tool() function accepts Zod schemas directly
+  // Note: AI SDK's tool() function has complex type constraints, so we use type assertions
   return tool({
     description: def.description,
     inputSchema: def.inputSchema, // Changed from 'parameters' to 'inputSchema' in AI SDK 5
-    execute: def.execute as any,
-  } as any) as any;
+    execute: def.execute as (args: unknown) => unknown | Promise<unknown>,
+  }) as AISDKTool;
 }
 
 /**
@@ -35,8 +45,8 @@ export function defineTool<T extends z.ZodObject<any>>(
   name: string,
   description: string,
   inputSchema: T,
-  execute: (args: z.infer<T>) => any | Promise<any>
-): ToolDefinition {
+  execute: (args: z.infer<T>) => unknown | Promise<unknown>
+): ToolDefinition<T> {
   return {
     name,
     description,
@@ -49,7 +59,7 @@ export function defineTool<T extends z.ZodObject<any>>(
  * Create AI SDK tools object from tool definitions
  */
 export function createAISDKToolsMap(
-  toolDefs: ToolDefinition[]
+  toolDefs: ToolDefinition<any>[]
 ): Record<string, AISDKTool> {
   const tools: Record<string, AISDKTool> = {};
   for (const def of toolDefs) {

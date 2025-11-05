@@ -107,7 +107,11 @@ async def run_evaluation(config: EvalConfig) -> GenerateOutputs:
     )
 
     # load environment
-    vf_env = vf.load_environment(env_id=config.env_id, **config.env_args)
+    vf_env = vf.load_environment(
+        env_id=config.env_id,
+        env_dir_path=config.env_dir_path,
+        **config.env_args,
+    )
 
     # run evaluation
     results_path = get_eval_results_path(config)

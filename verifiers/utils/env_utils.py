@@ -1,13 +1,78 @@
 import importlib
 import inspect
 import logging
-from typing import Callable
+import os
+import sys
+from pathlib import Path
+from typing import Callable, Optional
 
 from verifiers.envs.environment import Environment
 
+logger = logging.getLogger("verifiers.utils.env_utils")
 
-def load_environment(env_id: str, **env_args) -> Environment:
-    logger = logging.getLogger("verifiers.utils.env_utils")
+
+def _ensure_ts_bridge_on_path(env_dir_path: Optional[str]) -> None:
+    """Ensure the TypeScript bridge module is importable."""
+    if "verifiers_ts_loader" in sys.modules:
+        return
+
+    bridge_candidates: list[Path] = []
+
+    env_override = os.getenv("VERIFIERS_TS_BRIDGE_PATH")
+    if env_override:
+        bridge_candidates.append(Path(env_override))
+
+    if env_dir_path:
+        bridge_candidates.append(Path(env_dir_path).resolve().parent / "python-bridge")
+
+    for candidate in bridge_candidates:
+        if candidate.exists() and candidate.is_dir():
+            candidate_str = str(candidate)
+            if candidate_str not in sys.path:
+                sys.path.insert(0, candidate_str)
+
+
+def _load_ts_environment(
+    env_id: str, env_dir_path: Optional[str], **env_args
+) -> Optional[Environment]:
+    """Attempt to load a TypeScript environment using the bridge."""
+    try:
+        _ensure_ts_bridge_on_path(env_dir_path)
+        from verifiers_ts_loader import load_ts_environment  # type: ignore
+    except Exception:
+        return None
+
+    resolved_dir: Optional[Path] = None
+    if env_dir_path:
+        candidate_root = Path(env_dir_path).resolve()
+        if candidate_root.exists():
+            resolved_dir = candidate_root
+    else:
+        env_dir_var = os.getenv("VERIFIERS_ENV_DIR_PATH")
+        if env_dir_var:
+            candidate_root = Path(env_dir_var).resolve()
+            if candidate_root.exists():
+                resolved_dir = candidate_root
+
+    search_names = [env_id, env_id.replace("-", "_")]
+
+    if resolved_dir:
+        for name in search_names:
+            if (resolved_dir / name).exists():
+                return load_ts_environment(env_id=env_id, env_dir_path=str(resolved_dir), **env_args)
+
+    # Final attempt: rely on loader defaults if env_dir_path not provided
+    if env_dir_path is None and resolved_dir is None:
+        return load_ts_environment(env_id=env_id, **env_args)
+
+    return None
+
+
+def load_environment(
+    env_id: str,
+    env_dir_path: Optional[str] = None,
+    **env_args,
+) -> Environment:
     logger.info(f"Loading environment: {env_id}")
 
     module_name = env_id.replace("-", "_").split("/")[-1]
@@ -75,6 +140,13 @@ def load_environment(env_id: str, **env_args) -> Environment:
         return env_instance
 
     except ImportError as e:
+        ts_env = _load_ts_environment(env_id, env_dir_path, **env_args)
+        if ts_env is not None:
+            ts_env.env_id = ts_env.env_id or env_id
+            ts_env.env_args = ts_env.env_args or env_args
+            logger.info(f"Loaded TypeScript environment '{env_id}' from {env_dir_path or 'default search path'}")
+            return ts_env
+
         logger.error(
             f"Failed to import environment module {module_name} for env_id {env_id}: {str(e)}"
         )

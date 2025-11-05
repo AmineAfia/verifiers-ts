@@ -1,24 +1,34 @@
 {
-  "name": "hangman",
-  "version": "0.1.0",
-  "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "scripts": {
-    "build": "tsc",
-    "test": "node --loader tsx src/test.ts"
-  },
-  "dependencies": {
-    "verifiers-ts": "workspace:*",
-    "ai": "^5.0.0",
-    "@ai-sdk/openai": "^1.1.0",
-    "zod": "^3.23.8"
-  },
-  "devDependencies": {
-    "@types/node": "^20.0.0",
-    "tsx": "^4.7.0",
-    "typescript": "^5.3.0"
-  }
+    "name": "hangman",
+    "version": "0.1.0",
+    "type": "module",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "scripts": {
+        "build": "tsc",
+        "dev": "tsc --watch",
+        "test": "node --loader tsx src/test.ts",
+        "lint": "echo \"no lint configured\"",
+        "format": "echo \"use repo root formatter\"",
+        "vf-eval": "node ./node_modules/verifiers-ts/dist/cli/vf-eval.js"
+    },
+    "dependencies": {
+        "@ai-sdk/openai": "^2.0.59",
+        "ai": "^5.0.0",
+        "verifiers-ts": "workspace:*",
+        "zod": "^3.23.8"
+    },
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "tsx": "^4.7.0",
+        "typescript": "^5.3.0"
+    },
+    "verifiers": {
+        "envId": "hangman",
+        "entry": "./dist/index.js",
+        "eval": {
+            "numExamples": 5,
+            "rolloutsPerExample": 1
+        }
+    }
 }
-
-

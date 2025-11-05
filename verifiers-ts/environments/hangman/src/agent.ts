@@ -1,12 +1,21 @@
 import type { GenerateTextAgent, AISDKTool } from "verifiers-ts";
-import { tool, generateText, stepCountIs } from "ai";
+import { generateText, stepCountIs, tool } from "ai";
 import type { CoreMessage } from "ai";
 import { openai } from "@ai-sdk/openai";
+import { z } from "zod";
 
-const guessLetter = (tool as any)({
+const guessLetter = tool({
   description: "Guess a single letter in the Hangman word.",
-  execute: async (args: any) => `Guessed ${String(args?.letter ?? args).toUpperCase()}`,
-}) as AISDKTool;
+  inputSchema: z.object({
+    letter: z
+      .string()
+      .length(1, { message: "Provide exactly one character." })
+      .describe("Single letter to guess."),
+  }),
+  async execute({ letter }: { letter: string }) {
+    return `Guessed ${letter.toUpperCase()}`;
+  },
+});
 
 export const hangmanGenerateText = (
   messages: CoreMessage[],
@@ -37,6 +46,6 @@ export const hangmanGenerateText = (
 export const hangmanAgent: GenerateTextAgent = {
   generateText: hangmanGenerateText,
   tools: {
-    guess_letter: guessLetter,
+    guess_letter: guessLetter as AISDKTool,
   },
 };

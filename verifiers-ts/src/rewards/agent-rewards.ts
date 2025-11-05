@@ -5,6 +5,30 @@
 
 import type { RewardFunc, Messages, State, Info } from "../types/index.js";
 import { Parser } from "../parsers/parser.js";
+import { getStructuredOutputFromState } from "../utils/structured-output.js";
+
+type RewardInvokePayload = {
+  prompt: Messages;
+  completion: Messages;
+  answer: string;
+  state: State;
+  task: string;
+  info: Info;
+  example_id: number | null;
+  parser: Parser;
+};
+
+export interface StructuredOutputRewardContext<T = unknown> {
+  prompt: Messages;
+  completion: Messages;
+  answer: string;
+  state: State;
+  task: string;
+  info: Info;
+  exampleId: number | null;
+  parser: Parser;
+  structuredOutput: T | null;
+}
 
 /**
  * Create a reward function that checks correctness against an expected answer
@@ -84,6 +108,42 @@ export function stepCountReward(maxSteps: number): RewardFunc {
   };
 }
 
+export function structuredOutputReward<T>(
+  evaluate: (
+    context: StructuredOutputRewardContext<T>
+  ) => number | Promise<number>,
+  options: { defaultScore?: number } = {}
+): RewardFunc {
+  const defaultScore = options.defaultScore ?? 0;
+  return async (rawContext: unknown, ...positional: unknown[]): Promise<number> => {
+    const context = extractInvocationContext(rawContext, positional);
+    if (!context) {
+      return defaultScore;
+    }
+
+    const structuredOutput = getStructuredOutputFromState<T>(context.state);
+    const evaluationContext: StructuredOutputRewardContext<T> = {
+      prompt: context.prompt,
+      completion: context.completion,
+      answer: context.answer,
+      state: context.state,
+      task: context.task,
+      info: context.info,
+      exampleId: context.example_id ?? null,
+      parser: context.parser,
+      structuredOutput,
+    };
+
+    try {
+      const score = await evaluate(evaluationContext);
+      const numeric = Number(score);
+      return Number.isNaN(numeric) ? defaultScore : numeric;
+    } catch {
+      return defaultScore;
+    }
+  };
+}
+
 /**
  * Create a reward function that combines multiple reward functions
  * Useful for creating composite rewards with different weights
@@ -135,5 +195,68 @@ export function similarityReward(
   };
 }
 
+function extractInvocationContext(
+  rawContext: unknown,
+  positional: unknown[]
+): RewardInvokePayload | null {
+  if (isRewardInvokePayload(rawContext)) {
+    return rawContext;
+  }
 
+  const args = [rawContext, ...positional];
+  if (args.length < 3) {
+    return null;
+  }
 
+  const completion = args[0] as Messages;
+  const answer = typeof args[1] === "string" ? (args[1] as string) : "";
+  const stateCandidate = args[2];
+  const state =
+    stateCandidate && typeof stateCandidate === "object"
+      ? (stateCandidate as State)
+      : ({} as State);
+  const task = typeof args[3] === "string" ? (args[3] as string) : "default";
+  const info =
+    args.length > 4 && args[4] && typeof args[4] === "object"
+      ? (args[4] as Info)
+      : ({} as Info);
+  const exampleRaw = args.length > 5 ? args[5] : null;
+  const example_id =
+    typeof exampleRaw === "number"
+      ? exampleRaw
+      : exampleRaw === null || exampleRaw === undefined
+      ? null
+      : Number.isFinite(Number(exampleRaw))
+      ? Number(exampleRaw)
+      : null;
+  const parserCandidate =
+    state && typeof (state as Record<string, unknown>).parser === "object"
+      ? (state as Record<string, unknown>).parser
+      : null;
+
+  return {
+    prompt: [] as Messages,
+    completion,
+    answer,
+    state,
+    task,
+    info,
+    example_id,
+    parser: parserCandidate instanceof Parser ? parserCandidate : new Parser(),
+  };
+}
+
+function isRewardInvokePayload(value: unknown): value is RewardInvokePayload {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  return (
+    "completion" in candidate &&
+    "answer" in candidate &&
+    "state" in candidate &&
+    "task" in candidate &&
+    "info" in candidate &&
+    "parser" in candidate
+  );
+}
