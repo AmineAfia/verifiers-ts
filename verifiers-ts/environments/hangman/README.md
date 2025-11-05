@@ -24,7 +24,6 @@ Make sure you have access to an AI SDK compatible model (e.g., OpenAI via `@ai-s
 ```bash
 cd verifiers-ts/environments/hangman
 # First, ensure verifiers-ts is built (from repo root)
-cd ../..
 pnpm build
 
 # Then install and build the environment
