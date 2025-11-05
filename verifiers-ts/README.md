@@ -202,8 +202,6 @@ const env = await createRLEnvironment({
     }
   ),
 });
-```
-
 ### Single-Turn Environment
 
 ```typescript
