@@ -1,0 +1,23 @@
+{
+  "env_id": "hangman",
+  "env_args": {
+    "max_wrong_guesses": 6,
+    "max_turns": 20
+  },
+  "model": "gpt-5-mini",
+  "base_url": "https://api.openai.com/v1",
+  "num_examples": 5,
+  "rollouts_per_example": 5,
+  "sampling_args": {},
+  "date": "2025-11-05 19:35:03",
+  "time_ms": 263337,
+  "avg_reward": 0.325,
+  "avg_metrics": {
+    "correctnessReward": 0.25,
+    "efficiencyReward": 0.15,
+    "anonymous_reward": 0,
+    "reward_2": 0
+  },
+  "state_columns": [],
+  "path_to_save": "/Users/amine/Projects/solo/verifiers-ts/verifiers-ts/environments/hangman/outputs/evals/hangman--gpt-5-mini/c9558c3c"
+}

@@ -5,6 +5,7 @@ import type {
   State,
   SamplingArgs,
   MessageType,
+  ModelResponse,
 } from "../types/index.js";
 import type { AISDKTool } from "../utils/tool-utils.js";
 import { getSandboxClient, type SandboxConfig } from "../utils/sandbox-client.js";
@@ -46,21 +47,30 @@ export abstract class MultiTurnGenerateTextAdapter extends MultiTurnEnv {
     state = await super.setupState(state);
 
     if (this.sandboxConfig && !state.sandbox_id) {
-      const sandboxClient = await getSandboxClient();
-      const sandbox = await sandboxClient.createSandbox({
-        name: this.sandboxConfig.name || "sandbox-env",
-        dockerImage: this.sandboxConfig.dockerImage || "python:3.11-slim",
-        startCommand: this.sandboxConfig.startCommand,
-        cpuCores: this.sandboxConfig.cpuCores,
-        memoryGb: this.sandboxConfig.memoryGb,
-        diskSizeGb: this.sandboxConfig.diskSizeGb,
-        gpuCount: this.sandboxConfig.gpuCount,
-        timeoutMinutes: this.sandboxConfig.timeoutMinutes,
-        environmentVars: this.sandboxConfig.environmentVars,
-        teamId: this.sandboxConfig.teamId,
-        advancedConfigs: this.sandboxConfig.advancedConfigs,
-      });
-      state.sandbox_id = sandbox.id;
+      try {
+        const sandboxClient = await getSandboxClient();
+        const sandbox = await sandboxClient.createSandbox({
+          name: this.sandboxConfig.name || "sandbox-env",
+          dockerImage: this.sandboxConfig.dockerImage || "python:3.11-slim",
+          startCommand: this.sandboxConfig.startCommand,
+          cpuCores: this.sandboxConfig.cpuCores,
+          memoryGb: this.sandboxConfig.memoryGb,
+          diskSizeGb: this.sandboxConfig.diskSizeGb,
+          gpuCount: this.sandboxConfig.gpuCount,
+          timeoutMinutes: this.sandboxConfig.timeoutMinutes,
+          environmentVars: this.sandboxConfig.environmentVars,
+          teamId: this.sandboxConfig.teamId,
+          advancedConfigs: this.sandboxConfig.advancedConfigs,
+        });
+        state.sandbox_id = sandbox.id;
+        
+        // Wait for sandbox to be ready before proceeding with evaluation
+        // This ensures the sandbox is provisioned and running before any tool calls
+        await sandboxClient.waitForCreation(sandbox.id);
+      } catch (error) {
+        // Re-throw sandbox errors so they propagate up and cause process to exit
+        throw error;
+      }
     }
 
     return state;
@@ -79,19 +89,7 @@ export abstract class MultiTurnGenerateTextAdapter extends MultiTurnEnv {
     messageType: MessageType | null = null,
     apiKey?: string,
     baseUrl?: string
-  ): Promise<{
-    id: string;
-    choices: Array<{
-      message?: {
-        role: string;
-        content: string | null;
-        tool_calls?: unknown[];
-      };
-      text?: string;
-    }>;
-    toolCalls?: unknown[];
-    toolResults?: unknown[];
-  }> {
+  ): Promise<ModelResponse> {
     const resolvedMessageType = messageType || this.messageType;
     if (resolvedMessageType !== "chat") {
       throw new Error("MultiTurnGenerateTextAdapter only supports chat message type");

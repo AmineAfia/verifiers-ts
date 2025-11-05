@@ -1,13 +1,12 @@
 {
   "name": "verifiers-ts",
-"version": "0.0.1-alpha.13",
+"version": "0.0.1-alpha.17",
   "description": "TypeScript implementation of the verifiers framework for RL environments",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
 "files": [
     "dist",
-    "python-bridge",
     "README.md",
     "LICENSE"
 ],

@@ -29,6 +29,20 @@ export type State = Record<string, any>;
 
 export type SamplingArgs = Record<string, any>;
 
+export interface ModelResponse {
+  id: string;
+  choices: Array<{
+    message?: {
+      role: string;
+      content: string | null;
+      tool_calls?: unknown[];
+    };
+    text?: string;
+  }>;
+  toolCalls?: unknown[];
+  toolResults?: unknown[];
+}
+
 export type RewardFunc = (
   ...args: any[]
 ) => number | Promise<number>;

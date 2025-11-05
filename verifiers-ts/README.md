@@ -219,7 +219,7 @@ The library mirrors the Python verifiers structure:
 
 - **Results Format**: Saves results in JSONL format compatible with Python `vf-tui`
 - **Native TypeScript Evaluation**: TypeScript projects use native `vf-eval` CLI (no Python bridge needed)
-- **Sandbox Bridge**: Python bridge available for sandbox environments only
+- **Native Sandbox Client**: Direct HTTP API integration with Prime Intellect sandboxes (no Python dependencies)
 - **State Management**: Same state structure as Python verifiers
 
 ## Environment Types
@@ -254,9 +254,14 @@ The CLI automatically:
 
 For Python projects, `vf-eval` delegates to the Python `verifiers` CLI.
 
-## Sandbox Bridge
+## Sandbox Support
 
-Sandbox environments (using `SandboxEnv`) require the Python `sandbox_bridge.py` script to interact with Prime Intellect sandboxes. This bridge is automatically detected and used when available.
+Sandbox environments (using `SandboxEnv`) use native TypeScript HTTP client to interact with Prime Intellect sandboxes. No Python dependencies required.
+
+**Configuration:**
+- Set `PRIME_INTELLECT_API_KEY` or `PRIME_API_KEY` environment variable
+- Optional: Set `PRIME_INTELLECT_API_URL` (default: `https://api.primeintellect.ai`)
+- Optional: Set `PRIME_INTELLECT_TEAM_ID` for team-scoped sandboxes
 
 ## Examples
 

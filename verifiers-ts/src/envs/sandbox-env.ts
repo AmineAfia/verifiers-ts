@@ -5,7 +5,7 @@
 
 import type { Messages, State } from "../types/index.js";
 import { StatefulToolEnv, StatefulToolEnvOptions } from "./stateful-tool-env.js";
-import { defineTool } from "../utils/tool-utils.js";
+import { defineTool, type ToolDefinition } from "../utils/tool-utils.js";
 import { z } from "zod";
 
 export interface SandboxConfig {
@@ -65,7 +65,8 @@ export abstract class SandboxEnv extends StatefulToolEnv {
       }
     );
 
-    this.addTool(bashTool, ["sandbox_id"]);
+    // Cast to ToolDefinition<any> to allow passing to addTool which filters the schema
+    this.addTool(bashTool as ToolDefinition<any>, ["sandbox_id"]);
   }
 
   /**

@@ -531,9 +531,32 @@ async function main() {
     if (process.env.VERIFIERS_TS_DEBUG) {
       console.error((error as Error).stack);
     }
+    // Flush output streams before exiting
+    process.stdout.write("");
+    process.stderr.write("");
     process.exit(1);
   }
 }
 
-main();
+// Ensure unhandled promise rejections cause process to exit
+main().catch((error) => {
+  console.error(`Unhandled error: ${(error as Error).message}`);
+  if (process.env.VERIFIERS_TS_DEBUG) {
+    console.error((error as Error).stack);
+  }
+  // Flush output streams before exiting
+  process.stdout.write("");
+  process.stderr.write("");
+  process.exit(1);
+});
+
+// Handle unhandled promise rejections globally
+process.on("unhandledRejection", (reason, promise) => {
+  const errorMessage = reason instanceof Error ? reason.message : String(reason);
+  console.error("Unhandled promise rejection:", errorMessage);
+  // Use setTimeout to ensure output is flushed before exit
+  setTimeout(() => {
+    process.exit(1);
+  }, 100);
+});
 

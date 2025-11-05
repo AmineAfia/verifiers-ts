@@ -16,6 +16,7 @@ import type {
   MessageType,
   SamplingArgs,
   ChatMessage,
+  ModelResponse,
 } from "../types/index.js";
 import { Parser } from "../parsers/parser.js";
 import { Rubric } from "../rubrics/rubric.js";
@@ -139,26 +140,7 @@ export abstract class Environment {
   /**
    * Convert AI SDK response to verifiers format
    */
-  protected convertFromAISDKResponse(result: any): {
-    id: string;
-    choices: Array<{
-      message?: {
-        role: string;
-        content: string | null;
-        tool_calls?: Array<{
-          id: string;
-          type: string;
-          function: {
-            name: string;
-            arguments: string;
-          };
-        }>;
-      };
-      text?: string;
-    }>;
-    toolCalls?: unknown[];
-    toolResults?: unknown[];
-  } {
+  protected convertFromAISDKResponse(result: any): ModelResponse {
     // Handle AI SDK 5.0 result structure
     const text = result.text || "";
     const toolCalls: any[] = [];
@@ -230,8 +212,75 @@ export abstract class Environment {
       console.info("evalDataset is not set, falling back to train dataset");
       return this.getDataset(n, seed);
     }
-    // Simplified - in practice would shuffle and select n examples
-    return this.evalDataset;
+    
+    // Store reference to avoid repeated null checks
+    const evalDataset = this.evalDataset;
+    
+    // Limit to n examples if specified (n > 0)
+    // If n is -1, return all examples
+    if (n > 0 && evalDataset.prompt) {
+      const totalExamples = (evalDataset.prompt as unknown[]).length;
+      if (totalExamples < n) {
+        // If we have fewer examples than requested, repeat the dataset
+        const repeatCount = Math.ceil(n / totalExamples);
+        const promptArray = evalDataset.prompt || [];
+        const completionArray = evalDataset.completion || [];
+        const answerArray = evalDataset.answer || Array(totalExamples).fill("");
+        const taskArray = evalDataset.task || Array(totalExamples).fill("default");
+        const infoArray = evalDataset.info || Array(totalExamples).fill({});
+        const baseIds =
+          evalDataset.example_id ||
+          (evalDataset.id as number[] | undefined) ||
+          Array.from({ length: totalExamples }, (_, i) => i);
+        
+        const repeated: Dataset = {
+          ...evalDataset,
+          prompt: Array(repeatCount)
+            .fill(null)
+            .flatMap(() => promptArray)
+            .slice(0, n),
+          completion: Array(repeatCount)
+            .fill(null)
+            .flatMap(() => completionArray)
+            .slice(0, n),
+          answer: Array(repeatCount)
+            .fill(null)
+            .flatMap(() => answerArray)
+            .slice(0, n),
+          task: Array(repeatCount)
+            .fill(null)
+            .flatMap(() => taskArray)
+            .slice(0, n),
+          info: Array(repeatCount)
+            .fill(null)
+            .flatMap(() => infoArray)
+            .slice(0, n),
+          example_id: Array(repeatCount)
+            .fill(null)
+            .flatMap((_, repeatIdx) => {
+              return baseIds.map((id: number) => id * 10000 + repeatIdx);
+            })
+            .slice(0, n),
+        };
+        return repeated;
+      } else {
+        // Return first n examples
+        const limited: Dataset = {
+          ...evalDataset,
+          prompt: (evalDataset.prompt || []).slice(0, n),
+          completion: (evalDataset.completion || []).slice(0, n),
+          answer: (evalDataset.answer || []).slice(0, n),
+          task: (evalDataset.task || []).slice(0, n),
+          info: (evalDataset.info || []).slice(0, n),
+          example_id: (evalDataset.example_id || 
+            (evalDataset.id as number[] | undefined) ||
+            Array.from({ length: totalExamples }, (_, i) => i)).slice(0, n),
+        };
+        return limited;
+      }
+    }
+    
+    return evalDataset;
   }
 
   /**
@@ -245,8 +294,43 @@ export abstract class Environment {
     if (!inputs) {
       return null;
     }
+    
     // Repeat dataset entries for multiple rollouts per example
-    // Simplified implementation
+    // This matches Python's behavior: inputs.repeat(rollouts_per_example)
+    if (rolloutsPerExample > 1) {
+      const n = (inputs.prompt || []).length;
+      if (n > 0) {
+        const repeated: Dataset = {
+          ...inputs,
+          prompt: Array(rolloutsPerExample)
+            .fill(null)
+            .flatMap(() => inputs.prompt || []),
+          completion: Array(rolloutsPerExample)
+            .fill(null)
+            .flatMap(() => inputs.completion || []),
+          answer: Array(rolloutsPerExample)
+            .fill(null)
+            .flatMap(() => inputs.answer || Array(n).fill("")),
+          task: Array(rolloutsPerExample)
+            .fill(null)
+            .flatMap(() => inputs.task || Array(n).fill("default")),
+          info: Array(rolloutsPerExample)
+            .fill(null)
+            .flatMap(() => inputs.info || Array(n).fill({})),
+          example_id: Array(rolloutsPerExample)
+            .fill(null)
+            .flatMap((_, rolloutIdx) => {
+              const baseIds: number[] =
+                inputs.example_id ||
+                (inputs.id as number[] | undefined) ||
+                Array.from({ length: n }, (_, i) => i);
+              return baseIds.map((id: number) => id * 1000 + rolloutIdx);
+            }),
+        };
+        return repeated;
+      }
+    }
+    
     return inputs;
   }
 
@@ -334,19 +418,7 @@ export abstract class Environment {
     messageType: MessageType | null = null,
     apiKey?: string,
     baseUrl?: string
-  ): Promise<{
-    id: string;
-    choices: Array<{
-      message?: {
-        role: string;
-        content: string | null;
-        tool_calls?: unknown[];
-      };
-      text?: string;
-    }>;
-    toolCalls?: unknown[];
-    toolResults?: unknown[];
-  }> {
+  ): Promise<ModelResponse> {
     const resolvedMessageType = messageType || this.messageType;
     const resolvedSamplingArgs = { ...this.samplingArgs, ...samplingArgs };
 
