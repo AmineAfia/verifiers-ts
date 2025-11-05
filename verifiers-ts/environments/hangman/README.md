@@ -23,11 +23,6 @@ Make sure you have access to an AI SDK compatible model (e.g., OpenAI via `@ai-s
 
 ```bash
 cd verifiers-ts/environments/hangman
-# First, ensure verifiers-ts is built (from repo root)
-pnpm build
-
-# Then install and build the environment
-cd environments/hangman
 pnpm install
 pnpm build          # compiles the TypeScript sources
 pnpm vf-eval -- -n 5 -r 1 -m gpt-5-mini -s
