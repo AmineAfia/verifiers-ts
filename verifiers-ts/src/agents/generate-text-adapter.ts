@@ -72,39 +72,53 @@ export class GenerateTextAdapter extends SingleTurnEnv {
 
     resolvedState = await this.setupState(resolvedState);
 
-    const coreMessages = this.convertToCoreMessages(prompt);
-    const mergedTools = this.mergeTools(resolvedState);
-    const callOptions = this.buildCallOptions(mergedTools, samplingArgs, apiKey, baseUrl);
+    try {
+      const coreMessages = this.convertToCoreMessages(prompt);
+      const mergedTools = this.mergeTools(resolvedState);
+      const callOptions = this.buildCallOptions(mergedTools, samplingArgs, apiKey, baseUrl);
 
-    const result = await this.agent.generateText(coreMessages, callOptions);
-    const structuredOutput = extractExperimentalOutput(result);
+      const result = await this.agent.generateText(coreMessages, callOptions);
+      const structuredOutput = extractExperimentalOutput(result);
 
-    const completionMessages = this.convertResultToMessages(result, structuredOutput);
-    resolvedState.completion = completionMessages;
-    resolvedState.responses = [result];
-    if (!Array.isArray(resolvedState.raw_responses)) {
-      resolvedState.raw_responses = [];
-    }
-    resolvedState.raw_responses.push(result);
-
-    if (structuredOutput !== undefined) {
-      resolvedState.structured_output = structuredOutput;
-      if (!Array.isArray(resolvedState.structured_outputs)) {
-        resolvedState.structured_outputs = [];
+      const completionMessages = this.convertResultToMessages(result, structuredOutput);
+      resolvedState.completion = completionMessages;
+      resolvedState.responses = [result];
+      if (!Array.isArray(resolvedState.raw_responses)) {
+        resolvedState.raw_responses = [];
       }
-      resolvedState.structured_outputs.push(structuredOutput);
+      resolvedState.raw_responses.push(result);
+
+      if (structuredOutput !== undefined) {
+        resolvedState.structured_output = structuredOutput;
+        if (!Array.isArray(resolvedState.structured_outputs)) {
+          resolvedState.structured_outputs = [];
+        }
+        resolvedState.structured_outputs.push(structuredOutput);
+      }
+
+      resolvedState.toolCalls = result.toolCalls || [];
+      resolvedState.toolResults = result.toolResults || [];
+
+      const timing = resolvedState.timing || {};
+      timing.generation_ms = timing.generation_ms || 0;
+      timing.scoring_ms = timing.scoring_ms || 0;
+      timing.total_ms = timing.generation_ms + timing.scoring_ms;
+      resolvedState.timing = timing;
+
+      return [completionMessages, resolvedState];
+    } finally {
+      // Cleanup sandbox after rollout completes
+      if (this.sandboxConfig && resolvedState.sandbox_id) {
+        try {
+          const sandboxClient = await getSandboxClient();
+          await sandboxClient.deleteSandbox(resolvedState.sandbox_id as string);
+        } catch (error) {
+          console.warn("[Sandbox] Failed to delete sandbox:", error);
+        } finally {
+          resolvedState.sandbox_id = undefined;
+        }
+      }
     }
-
-    resolvedState.toolCalls = result.toolCalls || [];
-    resolvedState.toolResults = result.toolResults || [];
-
-    const timing = resolvedState.timing || {};
-    timing.generation_ms = timing.generation_ms || 0;
-    timing.scoring_ms = timing.scoring_ms || 0;
-    timing.total_ms = timing.generation_ms + timing.scoring_ms;
-    resolvedState.timing = timing;
-
-    return [completionMessages, resolvedState];
   }
 
   protected mergeTools(
@@ -215,21 +229,30 @@ export class GenerateTextAdapter extends SingleTurnEnv {
     state = await super.setupState(state);
 
     if (this.sandboxConfig && !state.sandbox_id) {
-      const sandboxClient = await getSandboxClient();
-      const sandbox = await sandboxClient.createSandbox({
-        name: this.sandboxConfig.name || "sandbox-env",
-        dockerImage: this.sandboxConfig.dockerImage || "python:3.11-slim",
-        startCommand: this.sandboxConfig.startCommand,
-        cpuCores: this.sandboxConfig.cpuCores,
-        memoryGb: this.sandboxConfig.memoryGb,
-        diskSizeGb: this.sandboxConfig.diskSizeGb,
-        gpuCount: this.sandboxConfig.gpuCount,
-        timeoutMinutes: this.sandboxConfig.timeoutMinutes,
-        environmentVars: this.sandboxConfig.environmentVars,
-        teamId: this.sandboxConfig.teamId,
-        advancedConfigs: this.sandboxConfig.advancedConfigs,
-      });
-      state.sandbox_id = sandbox.id;
+      try {
+        const sandboxClient = await getSandboxClient();
+        const sandbox = await sandboxClient.createSandbox({
+          name: this.sandboxConfig.name || "sandbox-env",
+          dockerImage: this.sandboxConfig.dockerImage || "python:3.11-slim",
+          startCommand: this.sandboxConfig.startCommand,
+          cpuCores: this.sandboxConfig.cpuCores,
+          memoryGb: this.sandboxConfig.memoryGb,
+          diskSizeGb: this.sandboxConfig.diskSizeGb,
+          gpuCount: this.sandboxConfig.gpuCount,
+          timeoutMinutes: this.sandboxConfig.timeoutMinutes,
+          environmentVars: this.sandboxConfig.environmentVars,
+          teamId: this.sandboxConfig.teamId,
+          advancedConfigs: this.sandboxConfig.advancedConfigs,
+        });
+        state.sandbox_id = sandbox.id;
+        
+        // Wait for sandbox to be ready before proceeding with evaluation
+        // This ensures the sandbox is provisioned and running before any tool calls
+        await sandboxClient.waitForCreation(sandbox.id);
+      } catch (error) {
+        // Re-throw sandbox errors so they propagate up and cause process to exit
+        throw error;
+      }
     }
 
     return state;
@@ -245,30 +268,29 @@ export class GenerateTextAdapter extends SingleTurnEnv {
     const serializedStructured =
       structuredOutput !== undefined ? JSON.stringify(structuredOutput) : undefined;
 
-    if (!message || !message.content) {
-      if (!serializedStructured) {
-        return [];
-      }
-      return [
-        {
-          role: "assistant",
-          content: serializedStructured,
-          tool_calls: message?.tool_calls as any,
-        },
-      ] as Messages;
-    }
-
+    // Extract content - prefer structured output, then text content, then empty string
     const assistantContent =
-      message.content ?? serializedStructured ?? "";
+      serializedStructured ?? message?.content ?? "";
+
+    // Check if we have tool calls or tool results - we should always include an assistant message
+    // even if content is empty, as long as there are tool calls or tool results
+    const hasToolCalls = message?.tool_calls && message.tool_calls.length > 0;
+    const hasToolResults = converted.toolResults && converted.toolResults.length > 0;
+
+    // If there's no content and no tool calls/results, return empty array
+    if (!assistantContent && !hasToolCalls && !hasToolResults) {
+      return [];
+    }
 
     const messagesArray: any[] = [
       {
         role: "assistant",
         content: assistantContent,
-        tool_calls: message.tool_calls as any,
+        tool_calls: message?.tool_calls as any,
       },
     ];
 
+    // Add tool results as tool messages
     if (converted.toolResults && converted.toolResults.length > 0) {
       for (const toolResult of converted.toolResults as any[]) {
         messagesArray.push({

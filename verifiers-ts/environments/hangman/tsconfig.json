@@ -3,7 +3,7 @@
     "target": "ES2022",
     "module": "ESNext",
     "lib": ["ES2022"],
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "rootDir": "./src",
     "outDir": "./dist",
     "declaration": true,
@@ -21,7 +21,13 @@
     "types": ["node"]
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "../../src", "../../dist"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "../../src",
+    "../../dist",
+    "node_modules/verifiers-ts/environments"
+  ]
 }
 
 

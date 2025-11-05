@@ -46,6 +46,6 @@ export const hangmanGenerateText = (
 export const hangmanAgent: GenerateTextAgent = {
   generateText: hangmanGenerateText,
   tools: {
-    guess_letter: guessLetter,
+    guess_letter: guessLetter as AISDKTool,
   },
 };

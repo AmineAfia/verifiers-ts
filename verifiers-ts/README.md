@@ -218,7 +218,8 @@ The library mirrors the Python verifiers structure:
 ### Compatibility
 
 - **Results Format**: Saves results in JSONL format compatible with Python `vf-tui`
-- **Python Bridge**: Python adapter available for `vf-eval`/`vf-tui` CLI integration
+- **Native TypeScript Evaluation**: TypeScript projects use native `vf-eval` CLI (no Python bridge needed)
+- **Native Sandbox Client**: Direct HTTP API integration with Prime Intellect sandboxes (no Python dependencies)
 - **State Management**: Same state structure as Python verifiers
 
 ## Environment Types
@@ -238,30 +239,29 @@ Extends `ToolEnv` for tools requiring dynamic state (e.g., sandbox IDs).
 ### SandboxEnv
 Abstract base for Prime Intellect sandbox integration.
 
-## Python Bridge
+## Evaluation
 
-Ship environments without writing Python glue. The `vf-eval` binary bundled with `verifiers-ts` automatically:
-
-- Ensures the environment is built (using `pnpm`/`npm` if needed)
-- Exposes it through the Python bridge
-- Invokes `uv run vf-eval` (or `python -m verifiers.scripts.eval` as a fallback)
+TypeScript environments are evaluated natively using the TypeScript `vf-eval` CLI:
 
 ```bash
 npx vf-eval hangman -n 5 -r 1
 ```
 
-If you need direct access from Python, you can still import the bridge manually:
+The CLI automatically:
+- Detects TypeScript projects (those with `package.json` containing `verifiers.envId` but no `pyproject.toml`)
+- Uses native TypeScript evaluation implementation
+- Saves results in compatible JSONL format for `vf-tui`
 
-```python
-from verifiers_ts_loader import load_environment
+For Python projects, `vf-eval` delegates to the Python `verifiers` CLI.
 
-env = load_environment("example-single-turn")
-results = await env.evaluate(
-    client=async_client,
-    model="gpt-4",
-    num_examples=100
-)
-```
+## Sandbox Support
+
+Sandbox environments (using `SandboxEnv`) use native TypeScript HTTP client to interact with Prime Intellect sandboxes. No Python dependencies required.
+
+**Configuration:**
+- Set `PRIME_INTELLECT_API_KEY` or `PRIME_API_KEY` environment variable
+- Optional: Set `PRIME_INTELLECT_API_URL` (default: `https://api.primeintellect.ai`)
+- Optional: Set `PRIME_INTELLECT_TEAM_ID` for team-scoped sandboxes
 
 ## Examples
 
@@ -271,19 +271,42 @@ See `environments/` directory for example implementations:
 
 ## Development
 
+This workspace uses [Turborepo](https://turbo.build) for task orchestration and caching. Use `turbo run` commands to build all packages with automatic dependency resolution and caching.
+
 ```bash
 # Install dependencies
-npm install
+pnpm install
 
-# Build
-npm run build
+# Build all packages (core + environments)
+pnpm turbo run build
 
-# Run tests (when implemented)
-npm test
+# Build a specific environment
+pnpm turbo run build --filter hangman
 
-# Lint
-npm run lint
+# Run tests
+pnpm turbo run test
+
+# Lint all packages
+pnpm turbo run lint
+
+# Format code
+pnpm turbo run format
+
+# Watch mode (runs all dev tasks in parallel)
+pnpm turbo run dev --parallel
+
+# Watch a specific environment
+pnpm turbo run dev --parallel --filter hangman
 ```
+
+### Turbo Features
+
+- **Task Dependencies**: Builds automatically respect workspace dependencies (`dependsOn: ["^build"]`)
+- **Local Caching**: Build outputs are cached locally for faster rebuilds
+- **Parallel Execution**: Dev tasks run in parallel across packages
+- **Filtering**: Use `--filter <package-name>` to target specific packages
+
+For remote caching (CI/CD), set `TURBO_TEAM` and `TURBO_TOKEN` environment variables.
 
 ## Status
 

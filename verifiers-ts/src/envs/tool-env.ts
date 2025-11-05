@@ -13,14 +13,14 @@ import {
 } from "../utils/tool-utils.js";
 
 export interface ToolEnvOptions extends MultiTurnEnvOptions {
-  tools?: ToolDefinition[];
+  tools?: ToolDefinition<any>[];
   maxTurns?: number;
   errorFormatter?: (error: Error) => string;
 }
 
 export class ToolEnv extends MultiTurnEnv {
-  protected tools: ToolDefinition[];
-  protected toolMap: Map<string, ToolDefinition>;
+  protected tools: ToolDefinition<any>[];
+  protected toolMap: Map<string, ToolDefinition<any>>;
   protected errorFormatter: (error: Error) => string;
   protected aiSdkTools: Record<string, AISDKTool>;
 
@@ -41,7 +41,7 @@ export class ToolEnv extends MultiTurnEnv {
     this.aiSdkTools = aiSdkTools;
   }
 
-  addTool(tool: ToolDefinition): void {
+  addTool(tool: ToolDefinition<any>): void {
     this.tools.push(tool);
     const aiSdkTool = createAISDKToolsMap([tool]);
     this.aiSdkTools[tool.name] = Object.values(aiSdkTool)[0];
@@ -72,7 +72,11 @@ export class ToolEnv extends MultiTurnEnv {
     }
 
     const lastMessage = messages[messages.length - 1];
-    if (typeof lastMessage !== "object" || lastMessage.role !== "assistant") {
+    if (typeof lastMessage !== "object" || lastMessage === null) {
+      return false;
+    }
+    
+    if (lastMessage.role !== "assistant") {
       return false;
     }
 
@@ -86,6 +90,9 @@ export class ToolEnv extends MultiTurnEnv {
    * Get AI SDK tools map for model calls
    */
   getAISDKTools(): Record<string, AISDKTool> {
+    if (!this.aiSdkTools || Object.keys(this.aiSdkTools).length === 0) {
+      return {};
+    }
     return this.aiSdkTools;
   }
 
@@ -103,16 +110,38 @@ export class ToolEnv extends MultiTurnEnv {
       if (!toolDef) {
         throw new Error(`Tool ${toolName} not found`);
       }
+      
+      // Validate tool arguments are not null/undefined
+      if (toolArgs === null || toolArgs === undefined) {
+        throw new Error(`Tool ${toolName} called with null or undefined arguments`);
+      }
+      
       const result = await toolDef.execute(toolArgs);
+      
+      // Ensure result is serializable
+      let content: string;
+      if (typeof result === "string") {
+        content = result;
+      } else if (result === null || result === undefined) {
+        content = "(no output)";
+      } else {
+        try {
+          content = JSON.stringify(result);
+        } catch (jsonError) {
+          content = String(result);
+        }
+      }
+      
       return {
         role: "tool",
-        content: typeof result === "string" ? result : JSON.stringify(result),
+        content,
         tool_call_id: toolCallId,
       };
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const error = e instanceof Error ? e : new Error(String(e));
       return {
         role: "tool",
-        content: this.errorFormatter(e),
+        content: this.errorFormatter(error),
         tool_call_id: toolCallId,
       };
     }

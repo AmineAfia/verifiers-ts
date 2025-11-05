@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 
+/**
+ * vf-eval CLI - Detects TypeScript vs Python projects and routes accordingly
+ * For TypeScript projects: uses native TypeScript implementation
+ * For Python projects: delegates to Python verifiers CLI
+ */
+
 import { spawn, spawnSync } from "child_process";
 import fs from "fs";
 import path from "path";
@@ -20,8 +26,6 @@ type EnvPackage = {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const packageRoot = path.resolve(__dirname, "..", "..");
-const pythonBridgePath = path.resolve(packageRoot, "python-bridge");
 
 const rawArgs = process.argv.slice(2);
 let envIdFromArgs: string | undefined;
@@ -128,256 +132,293 @@ forwardedArgs = normalisedArgs;
 
 let resolvedEnvDirPath = envDirFromArgs;
 
-if (!resolvedEnvDirPath) {
-  if (envPackage?.manifest?.verifiers?.envDir) {
-    resolvedEnvDirPath = path.resolve(
-      envPackage.dir,
-      envPackage.manifest.verifiers.envDir
-    );
-  } else if (envPackage) {
-    resolvedEnvDirPath = path.dirname(envPackage.dir);
-  }
+if (!resolvedEnvDirPath && envPackage) {
+  const manifestEnvDir = envPackage.manifest.verifiers?.envDir;
 
-  if (resolvedEnvDirPath) {
-    forwardedArgs.push("--env-dir-path", resolvedEnvDirPath);
+  if (manifestEnvDir) {
+    resolvedEnvDirPath = path.resolve(envPackage.dir, manifestEnvDir);
+  } else {
+    const parentDir = path.dirname(envPackage.dir);
+    const envDirCandidates: string[] = [];
+    if (envId) {
+      envDirCandidates.push(path.join(parentDir, envId));
+      envDirCandidates.push(path.join(parentDir, envId.replace(/-/g, "_")));
+    }
+
+    const matchingParent = envDirCandidates.find((candidate) =>
+      fs.existsSync(candidate)
+    );
+
+    resolvedEnvDirPath = matchingParent ? parentDir : envPackage.dir;
   }
 }
-
-const pythonArgs = [envId, ...forwardedArgs];
-
-const childEnv = { ...process.env };
 
 if (resolvedEnvDirPath) {
-  childEnv.VERIFIERS_ENV_DIR_PATH = resolvedEnvDirPath;
+  forwardedArgs.push("--env-dir-path", resolvedEnvDirPath);
 }
 
-if (fs.existsSync(pythonBridgePath)) {
-  const existing = process.env.PYTHONPATH;
-  const candidates = [pythonBridgePath];
-  if (existing) {
-    candidates.push(existing);
-  }
-  childEnv.PYTHONPATH = candidates.join(path.delimiter);
+// Check if this is a TypeScript project (has package.json with verifiers.envId but no pyproject.toml)
+const isStandaloneTsProject =
+  envPackage &&
+  !fs.existsSync(path.join(process.cwd(), "pyproject.toml")) &&
+  !fs.existsSync(path.join(process.cwd(), "setup.py"));
 
-  if (!childEnv.VERIFIERS_TS_BRIDGE_PATH) {
-    childEnv.VERIFIERS_TS_BRIDGE_PATH = pythonBridgePath;
-  }
-}
-
-if (!childEnv.UV_CACHE_DIR) {
-  try {
-    const defaultCache = path.join(pythonCwd, ".uv-cache");
-    fs.mkdirSync(defaultCache, { recursive: true });
-    childEnv.UV_CACHE_DIR = defaultCache;
-  } catch (error) {
+// For TypeScript projects, use native implementation
+if (isStandaloneTsProject) {
+  // Import and run native TypeScript implementation
+  // Use dynamic import to handle ESM properly
+  import("./vf-eval-native.js").catch((error) => {
+    console.error(`Failed to load native TypeScript vf-eval: ${error.message}`);
     if (process.env.VERIFIERS_TS_DEBUG) {
-      console.warn(
-        `[vf-eval] Failed to prepare UV cache directory: ${(error as Error).message}`
-      );
+      console.error(error.stack);
+    }
+    process.exit(1);
+  });
+  // Exit early - native implementation will handle everything
+  // Note: We can't use await here at top level, so we let the import run async
+  // The native module will call process.exit when done
+} else {
+  // For Python projects, delegate to Python CLI
+  const pythonArgs = [envId, ...forwardedArgs];
+
+  const childEnv = { ...process.env };
+
+  if (resolvedEnvDirPath) {
+    childEnv.VERIFIERS_ENV_DIR_PATH = resolvedEnvDirPath;
+  }
+
+  if (!childEnv.UV_CACHE_DIR) {
+    try {
+      const defaultCache = path.join(pythonCwd, ".uv-cache");
+      fs.mkdirSync(defaultCache, { recursive: true });
+      childEnv.UV_CACHE_DIR = defaultCache;
+    } catch (error) {
+      if (process.env.VERIFIERS_TS_DEBUG) {
+        console.warn(
+          `[vf-eval] Failed to prepare UV cache directory: ${(error as Error).message}`
+        );
+      }
     }
   }
-}
 
-if (!childEnv.UV_PYTHON_INSTALL_DIR) {
-  try {
-    const installDir = path.join(pythonCwd, ".uv-python");
-    fs.mkdirSync(installDir, { recursive: true });
-    childEnv.UV_PYTHON_INSTALL_DIR = installDir;
-  } catch (error) {
-    if (process.env.VERIFIERS_TS_DEBUG) {
-      console.warn(
-        `[vf-eval] Failed to prepare UV Python install dir: ${(error as Error).message}`
-      );
+  if (!childEnv.UV_PYTHON_INSTALL_DIR) {
+    try {
+      const installDir = path.join(pythonCwd, ".uv-python");
+      fs.mkdirSync(installDir, { recursive: true });
+      childEnv.UV_PYTHON_INSTALL_DIR = installDir;
+    } catch (error) {
+      if (process.env.VERIFIERS_TS_DEBUG) {
+        console.warn(
+          `[vf-eval] Failed to prepare UV Python install dir: ${(error as Error).message}`
+        );
+      }
     }
   }
-}
 
-function commandExists(command: string): boolean {
-  try {
-    const result = spawnSync(command, ["--version"], {
-      stdio: "ignore",
-    });
-    return result.status === 0;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+  function commandExists(command: string): boolean {
+    try {
+      const result = spawnSync(command, ["--version"], {
+        stdio: "ignore",
+      });
+      return result.status === 0;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return false;
+      }
       return false;
     }
-    return false;
-  }
-}
-
-function resolvePythonCommand(): string {
-  if (childEnv.PYTHON && commandExists(childEnv.PYTHON)) {
-    return childEnv.PYTHON;
-  }
-  if (commandExists("python3")) {
-    return "python3";
-  }
-  if (commandExists("python")) {
-    return "python";
-  }
-  return childEnv.PYTHON ?? "python3";
-}
-
-function getVenvPythonPath(venvDir: string): string {
-  return path.join(
-    venvDir,
-    process.platform === "win32" ? "Scripts" : "bin",
-    process.platform === "win32" ? "python.exe" : "python"
-  );
-}
-
-function hasLzmaSupport(pythonCommand: string): boolean {
-  const check = spawnSync(
-    pythonCommand,
-    ["-c", "import lzma"],
-    { stdio: "ignore", env: childEnv }
-  );
-  return check.status === 0;
-}
-
-function tryResolveUvPython(): string | undefined {
-  if (!commandExists("uv")) {
-    return undefined;
   }
 
-  const find = spawnSync(
-    "uv",
-    ["python", "find", "--managed-python", "3.11"],
-    { env: childEnv, encoding: "utf8" }
-  );
-  if (find.status === 0) {
-    const candidate = find.stdout.trim();
-    if (candidate && hasLzmaSupport(candidate)) {
-      return candidate;
+  function resolvePythonCommand(): string {
+    if (childEnv.PYTHON && commandExists(childEnv.PYTHON)) {
+      return childEnv.PYTHON;
     }
-  }
-
-  const install = spawnSync(
-    "uv",
-    ["python", "install", "3.11"],
-    { env: childEnv, stdio: "inherit" }
-  );
-  if (install.status !== 0) {
-    return undefined;
-  }
-
-  const locate = spawnSync(
-    "uv",
-    ["python", "find", "--managed-python", "3.11"],
-    { env: childEnv, encoding: "utf8" }
-  );
-  if (locate.status === 0) {
-    const candidate = locate.stdout.trim();
-    if (candidate && hasLzmaSupport(candidate)) {
-      return candidate;
+    if (commandExists("python3")) {
+      return "python3";
     }
-  }
-
-  return undefined;
-}
-
-function ensurePythonHasLzma(basePython: string): string {
-  if (hasLzmaSupport(basePython)) {
-    return basePython;
-  }
-
-  console.warn(
-    `[vf-eval] Python interpreter "${basePython}" is missing lzma support.`
-  );
-
-  const uvPython = tryResolveUvPython();
-  if (uvPython) {
-    console.warn(`[vf-eval] Using uv-managed Python at ${uvPython}.`);
-    return uvPython;
-  }
-
-  console.error(
-    "[vf-eval] Unable to locate a Python interpreter with lzma support. " +
-      "Reinstall Python with lzma enabled (e.g. `brew install xz` then `pyenv install --patch ...`) " +
-      "or set VERIFIERS_TS_USE_UV=1 to let uv manage Python."
-  );
-  process.exit(1);
-}
-
-function ensurePythonEnvironment(basePython: string): string {
-  const venvDir = path.join(pythonCwd, ".vf-eval");
-  const venvPython = getVenvPythonPath(venvDir);
-
-  if (!fs.existsSync(venvPython)) {
-    const createVenv = spawnSync(basePython, ["-m", "venv", venvDir], {
-      stdio: "inherit",
-      env: childEnv,
-    });
-    if (createVenv.status !== 0) {
-      throw new Error("Failed to create Python virtual environment for vf-eval.");
+    if (commandExists("python")) {
+      return "python";
     }
+    return childEnv.PYTHON ?? "python3";
   }
 
-  const markerFile = path.join(venvDir, ".verifiers_ts_ready");
-  if (!fs.existsSync(markerFile)) {
+  function getVenvPythonPath(venvDir: string): string {
+    return path.join(
+      venvDir,
+      process.platform === "win32" ? "Scripts" : "bin",
+      process.platform === "win32" ? "python.exe" : "python"
+    );
+  }
+
+  function hasLzmaSupport(pythonCommand: string): boolean {
+    const check = spawnSync(
+      pythonCommand,
+      ["-c", "import lzma"],
+      { stdio: "ignore", env: childEnv }
+    );
+    return check.status === 0;
+  }
+
+  function tryResolveUvPython(): string | undefined {
+    if (!commandExists("uv")) {
+      return undefined;
+    }
+
+    const find = spawnSync(
+      "uv",
+      ["python", "find", "--managed-python", "3.11"],
+      { env: childEnv, encoding: "utf8" }
+    );
+    if (find.status === 0) {
+      const candidate = find.stdout.trim();
+      if (candidate && hasLzmaSupport(candidate)) {
+        return candidate;
+      }
+    }
+
     const install = spawnSync(
-      venvPython,
-      ["-m", "pip", "install", "-e", "."],
-      { stdio: "inherit", cwd: pythonCwd, env: childEnv }
+      "uv",
+      ["python", "install", "3.11"],
+      { env: childEnv, stdio: "inherit" }
     );
     if (install.status !== 0) {
-      throw new Error("Failed to install Python dependencies for vf-eval.");
+      return undefined;
     }
-    fs.writeFileSync(markerFile, "ok");
-  }
 
-  return venvPython;
-}
-
-const preferUv = process.env.VERIFIERS_TS_USE_UV === "1";
-
-let pythonInvoker: { command: string; args: string[] };
-
-if (preferUv && commandExists("uv")) {
-  pythonInvoker = { command: "uv", args: ["run", "vf-eval"] };
-} else {
-  const basePython = ensurePythonHasLzma(resolvePythonCommand());
-  let pythonCommand = basePython;
-  try {
-    pythonCommand = ensurePythonEnvironment(basePython);
-  } catch (error) {
-    console.warn(
-      `[vf-eval] Failed to bootstrap managed Python env: ${(error as Error).message}. Falling back to system Python.`
+    const locate = spawnSync(
+      "uv",
+      ["python", "find", "--managed-python", "3.11"],
+      { env: childEnv, encoding: "utf8" }
     );
+    if (locate.status === 0) {
+      const candidate = locate.stdout.trim();
+      if (candidate && hasLzmaSupport(candidate)) {
+        return candidate;
+      }
+    }
+
+    return undefined;
   }
-  childEnv.PYTHON = pythonCommand;
-  pythonInvoker = {
-    command: pythonCommand,
-    args: ["-m", "verifiers.scripts.eval"],
-  };
+
+  function ensurePythonHasLzma(basePython: string): string {
+    if (hasLzmaSupport(basePython)) {
+      return basePython;
+    }
+
+    console.warn(
+      `[vf-eval] Python interpreter "${basePython}" is missing lzma support.`
+    );
+
+    const uvPython = tryResolveUvPython();
+    if (uvPython) {
+      console.warn(`[vf-eval] Using uv-managed Python at ${uvPython}.`);
+      return uvPython;
+    }
+
+    console.error(
+      "[vf-eval] Unable to locate a Python interpreter with lzma support. " +
+        "Reinstall Python with lzma enabled (e.g. `brew install xz` then `pyenv install --patch ...`) " +
+        "or set VERIFIERS_TS_USE_UV=1 to let uv manage Python."
+    );
+    process.exit(1);
+  }
+
+  function ensurePythonEnvironment(basePython: string): string {
+    const venvDir = path.join(pythonCwd, ".vf-eval");
+    const venvPython = getVenvPythonPath(venvDir);
+
+    if (!fs.existsSync(venvPython)) {
+      const createVenv = spawnSync(basePython, ["-m", "venv", venvDir], {
+        stdio: "inherit",
+        env: childEnv,
+      });
+      if (createVenv.status !== 0) {
+        throw new Error("Failed to create Python virtual environment for vf-eval.");
+      }
+    }
+
+    const markerFile = path.join(venvDir, ".verifiers_ts_ready");
+    if (!fs.existsSync(markerFile)) {
+      // Check if this is a Python project (has pyproject.toml or setup.py)
+      const hasPyproject = fs.existsSync(path.join(pythonCwd, "pyproject.toml"));
+      const hasSetupPy = fs.existsSync(path.join(pythonCwd, "setup.py"));
+
+      if (hasPyproject || hasSetupPy) {
+        // Python project: install in editable mode
+        const install = spawnSync(
+          venvPython,
+          ["-m", "pip", "install", "-e", "."],
+          { stdio: "inherit", cwd: pythonCwd, env: childEnv }
+        );
+        if (install.status !== 0) {
+          throw new Error("Failed to install Python dependencies for vf-eval.");
+        }
+      } else {
+        // TypeScript project: just install verifiers package
+        const install = spawnSync(
+          venvPython,
+          ["-m", "pip", "install", "verifiers"],
+          { stdio: "inherit", cwd: pythonCwd, env: childEnv }
+        );
+        if (install.status !== 0) {
+          throw new Error("Failed to install verifiers Python package for vf-eval.");
+        }
+      }
+      fs.writeFileSync(markerFile, "ok");
+    }
+
+    return venvPython;
+  }
+
+  const preferUv = process.env.VERIFIERS_TS_USE_UV === "1";
+
+  let pythonInvoker: { command: string; args: string[] };
+
+  if (preferUv && commandExists("uv")) {
+    pythonInvoker = { command: "uv", args: ["run", "vf-eval"] };
+  } else {
+    const basePython = ensurePythonHasLzma(resolvePythonCommand());
+    let pythonCommand = basePython;
+    try {
+      pythonCommand = ensurePythonEnvironment(basePython);
+    } catch (error) {
+      console.warn(
+        `[vf-eval] Failed to bootstrap managed Python env: ${(error as Error).message}. Falling back to system Python.`
+      );
+    }
+    childEnv.PYTHON = pythonCommand;
+    pythonInvoker = {
+      command: pythonCommand,
+      args: ["-m", "verifiers.scripts.eval"],
+    };
+  }
+
+  if (process.env.VERIFIERS_TS_DEBUG) {
+    console.log(
+      `[vf-eval] spawning: ${pythonInvoker.command} ${[...pythonInvoker.args, ...pythonArgs].join(" ")}`
+    );
+    console.log(`[vf-eval] working directory: ${pythonCwd}`);
+    if (resolvedEnvDirPath) {
+      console.log(`[vf-eval] env dir: ${resolvedEnvDirPath}`);
+    }
+  }
+
+  const child = spawn(pythonInvoker.command, [...pythonInvoker.args, ...pythonArgs], {
+    stdio: "inherit",
+    env: childEnv,
+    cwd: pythonCwd,
+  });
+
+  child.on("exit", (code, signal) => {
+    if (signal) {
+      process.kill(process.pid, signal);
+      return;
+    }
+    process.exit(code ?? 0);
+  });
+
+  child.on("error", (error) => {
+    console.error(`Failed to run ${pythonInvoker.command}: ${error.message}`);
+    process.exit(1);
+  });
 }
-
-if (process.env.VERIFIERS_TS_DEBUG) {
-  console.log(
-    `[vf-eval] spawning: ${pythonInvoker.command} ${[...pythonInvoker.args, ...pythonArgs].join(" ")}`
-  );
-  console.log(`[vf-eval] working directory: ${pythonCwd}`);
-  if (resolvedEnvDirPath) {
-    console.log(`[vf-eval] env dir: ${resolvedEnvDirPath}`);
-  }
-}
-
-const child = spawn(pythonInvoker.command, [...pythonInvoker.args, ...pythonArgs], {
-  stdio: "inherit",
-  env: childEnv,
-  cwd: pythonCwd,
-});
-
-child.on("exit", (code, signal) => {
-  if (signal) {
-    process.kill(process.pid, signal);
-    return;
-  }
-  process.exit(code ?? 0);
-});
-
-child.on("error", (error) => {
-  console.error(`Failed to run ${pythonInvoker.command}: ${error.message}`);
-  process.exit(1);
-});

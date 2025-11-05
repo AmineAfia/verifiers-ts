@@ -25,9 +25,9 @@ Make sure you have access to an AI SDK compatible model (e.g., OpenAI via `@ai-s
 cd verifiers-ts/environments/hangman
 pnpm install
 pnpm build          # compiles the TypeScript sources
+pnpm vf-eval -- -n 5 -r 1 -m gpt-5-mini -s
 ```
 
-These commands produce the compiled JS under `dist/`; the `vf-eval` CLI bootstraps its own Python environment on demand.
 
 ---
 

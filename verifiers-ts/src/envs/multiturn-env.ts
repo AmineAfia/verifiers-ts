@@ -145,10 +145,29 @@ export abstract class MultiTurnEnv extends Environment {
       );
     }
 
+    // Validate state integrity
+    if (!resolvedState || typeof resolvedState !== "object") {
+      throw new Error("Invalid state: state must be an object");
+    }
+    if (resolvedState.prompt === undefined) {
+      throw new Error("Invalid state: prompt is required");
+    }
+
     const startTime = Date.now();
     console.warn("[MultiTurnEnv] About to call setupState");
-    resolvedState = await this.setupState(resolvedState);
+    try {
+      resolvedState = await this.setupState(resolvedState);
+    } catch (error) {
+      throw new Error(
+        `Failed to setup state: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
     console.warn("[MultiTurnEnv] setupState completed");
+    
+    // Validate state after setup
+    if (!resolvedState || typeof resolvedState !== "object") {
+      throw new Error("State corruption: setupState returned invalid state");
+    }
 
     // Validate message types
     if (this.messageType === "chat") {
@@ -177,7 +196,27 @@ export abstract class MultiTurnEnv extends Environment {
 
     // Main rollout loop
     while (!isCompleted) {
-      const contextMessages = await this.getContextMessages(resolvedState);
+      // Validate state before each iteration
+      if (!resolvedState || typeof resolvedState !== "object") {
+        throw new Error("State corruption detected in rollout loop");
+      }
+      
+      // Check for max turns to prevent infinite loops
+      const currentTurn = (resolvedState.turn as number) || 0;
+      if (this.maxTurns > 0 && currentTurn >= this.maxTurns) {
+        resolvedState.max_turns_reached = true;
+        break;
+      }
+
+      let contextMessages: Messages;
+      try {
+        contextMessages = await this.getContextMessages(resolvedState);
+      } catch (error) {
+        throw new Error(
+          `Failed to get context messages: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+
       const completed = await this.isCompleted(contextMessages, resolvedState);
 
       if (completed) {
@@ -190,15 +229,27 @@ export abstract class MultiTurnEnv extends Environment {
         ? aiSdkTools
         : null;
 
-      const response = await this.getModelResponse(
-        modelId,
-        contextMessages,
-        toolsForCall,
-        samplingArgs,
-        this.messageType,
-        apiKey,
-        baseUrl
-      );
+      let response;
+      try {
+        response = await this.getModelResponse(
+          modelId,
+          contextMessages,
+          toolsForCall,
+          samplingArgs,
+          this.messageType,
+          apiKey,
+          baseUrl
+        );
+      } catch (error) {
+        throw new Error(
+          `Failed to get model response: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+      
+      // Validate response
+      if (!response || typeof response !== "object") {
+        throw new Error("Invalid model response: response must be an object");
+      }
 
       // Handle overlong prompt
       if (response?.id === "overlong-prompt") {
@@ -269,7 +320,20 @@ export abstract class MultiTurnEnv extends Environment {
       }
 
       // Get environment response (for custom non-tool responses)
-      const [envMessages, updatedState] = await this.envResponse(contextMessagesAfter, resolvedState);
+      let envMessages: Messages;
+      let updatedState: State;
+      try {
+        [envMessages, updatedState] = await this.envResponse(contextMessagesAfter, resolvedState);
+      } catch (error) {
+        throw new Error(
+          `Failed to get environment response: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+      
+      // Validate updated state
+      if (!updatedState || typeof updatedState !== "object") {
+        throw new Error("State corruption: envResponse returned invalid state");
+      }
 
       resolvedState = updatedState;
       resolvedState.turn = ((resolvedState.turn as number) || 0) + 1;

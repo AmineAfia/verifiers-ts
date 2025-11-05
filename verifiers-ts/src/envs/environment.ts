@@ -16,6 +16,7 @@ import type {
   MessageType,
   SamplingArgs,
   ChatMessage,
+  ModelResponse,
 } from "../types/index.js";
 import { Parser } from "../parsers/parser.js";
 import { Rubric } from "../rubrics/rubric.js";
@@ -139,43 +140,51 @@ export abstract class Environment {
   /**
    * Convert AI SDK response to verifiers format
    */
-  protected convertFromAISDKResponse(result: any): {
-    id: string;
-    choices: Array<{
-      message?: {
-        role: string;
-        content: string | null;
-        tool_calls?: Array<{
-          id: string;
-          type: string;
-          function: {
-            name: string;
-            arguments: string;
-          };
-        }>;
-      };
-      text?: string;
-    }>;
-    toolCalls?: unknown[];
-    toolResults?: unknown[];
-  } {
+  protected convertFromAISDKResponse(result: any): ModelResponse {
     // Handle AI SDK 5.0 result structure
-    const text = result.text || "";
+    // According to AI SDK docs, result.text contains the final generated text after all tool calls
+    let text = result.text || "";
     const toolCalls: any[] = [];
     const toolResults: any[] = [];
 
-    // Extract tool calls from steps or final result
-    if (result.steps) {
+    // Extract tool calls and results from steps or final result
+    if (result.steps && Array.isArray(result.steps)) {
+      // According to AI SDK docs, steps contain StepResult objects with:
+      // - text: The generated text in that step
+      // - toolCalls: Tool calls made in that step
+      // - toolResults: Tool results from that step
       for (const step of result.steps) {
-        if (step.toolCalls) {
+        if (step.toolCalls && Array.isArray(step.toolCalls)) {
           toolCalls.push(...step.toolCalls);
         }
-        if (step.toolResults) {
+        if (step.toolResults && Array.isArray(step.toolResults)) {
           toolResults.push(...step.toolResults);
         }
+        // Fallback: If result.text is empty, check last step for text
+        // (result.text should already contain accumulated text, but this is a safety check)
+        if (!text && step.text && typeof step.text === "string") {
+          text = step.text;
+        }
       }
-    } else if (result.toolCalls) {
-      toolCalls.push(...result.toolCalls);
+    }
+    
+    // According to AI SDK docs, result.toolCalls and result.toolResults contain
+    // tool calls/results from the LAST step only. We prefer using steps to get all of them.
+    // But we'll include top-level ones if steps weren't available.
+    if (toolCalls.length === 0 && result.toolCalls) {
+      if (Array.isArray(result.toolCalls)) {
+        toolCalls.push(...result.toolCalls);
+      } else {
+        toolCalls.push(result.toolCalls);
+      }
+    }
+    
+    if (toolResults.length === 0 && result.toolResults) {
+      if (Array.isArray(result.toolResults)) {
+        toolResults.push(...result.toolResults);
+      } else {
+        toolResults.push(result.toolResults);
+      }
     }
 
     // Convert tool calls to OpenAI format
@@ -230,8 +239,75 @@ export abstract class Environment {
       console.info("evalDataset is not set, falling back to train dataset");
       return this.getDataset(n, seed);
     }
-    // Simplified - in practice would shuffle and select n examples
-    return this.evalDataset;
+    
+    // Store reference to avoid repeated null checks
+    const evalDataset = this.evalDataset;
+    
+    // Limit to n examples if specified (n > 0)
+    // If n is -1, return all examples
+    if (n > 0 && evalDataset.prompt) {
+      const totalExamples = (evalDataset.prompt as unknown[]).length;
+      if (totalExamples < n) {
+        // If we have fewer examples than requested, repeat the dataset
+        const repeatCount = Math.ceil(n / totalExamples);
+        const promptArray = evalDataset.prompt || [];
+        const completionArray = evalDataset.completion || [];
+        const answerArray = evalDataset.answer || Array(totalExamples).fill("");
+        const taskArray = evalDataset.task || Array(totalExamples).fill("default");
+        const infoArray = evalDataset.info || Array(totalExamples).fill({});
+        const baseIds =
+          evalDataset.example_id ||
+          (evalDataset.id as number[] | undefined) ||
+          Array.from({ length: totalExamples }, (_, i) => i);
+        
+        const repeated: Dataset = {
+          ...evalDataset,
+          prompt: Array(repeatCount)
+            .fill(null)
+            .flatMap(() => promptArray)
+            .slice(0, n),
+          completion: Array(repeatCount)
+            .fill(null)
+            .flatMap(() => completionArray)
+            .slice(0, n),
+          answer: Array(repeatCount)
+            .fill(null)
+            .flatMap(() => answerArray)
+            .slice(0, n),
+          task: Array(repeatCount)
+            .fill(null)
+            .flatMap(() => taskArray)
+            .slice(0, n),
+          info: Array(repeatCount)
+            .fill(null)
+            .flatMap(() => infoArray)
+            .slice(0, n),
+          example_id: Array(repeatCount)
+            .fill(null)
+            .flatMap((_, repeatIdx) => {
+              return baseIds.map((id: number) => id * 10000 + repeatIdx);
+            })
+            .slice(0, n),
+        };
+        return repeated;
+      } else {
+        // Return first n examples
+        const limited: Dataset = {
+          ...evalDataset,
+          prompt: (evalDataset.prompt || []).slice(0, n),
+          completion: (evalDataset.completion || []).slice(0, n),
+          answer: (evalDataset.answer || []).slice(0, n),
+          task: (evalDataset.task || []).slice(0, n),
+          info: (evalDataset.info || []).slice(0, n),
+          example_id: (evalDataset.example_id || 
+            (evalDataset.id as number[] | undefined) ||
+            Array.from({ length: totalExamples }, (_, i) => i)).slice(0, n),
+        };
+        return limited;
+      }
+    }
+    
+    return evalDataset;
   }
 
   /**
@@ -245,8 +321,43 @@ export abstract class Environment {
     if (!inputs) {
       return null;
     }
+    
     // Repeat dataset entries for multiple rollouts per example
-    // Simplified implementation
+    // This matches Python's behavior: inputs.repeat(rollouts_per_example)
+    if (rolloutsPerExample > 1) {
+      const n = (inputs.prompt || []).length;
+      if (n > 0) {
+        const repeated: Dataset = {
+          ...inputs,
+          prompt: Array(rolloutsPerExample)
+            .fill(null)
+            .flatMap(() => inputs.prompt || []),
+          completion: Array(rolloutsPerExample)
+            .fill(null)
+            .flatMap(() => inputs.completion || []),
+          answer: Array(rolloutsPerExample)
+            .fill(null)
+            .flatMap(() => inputs.answer || Array(n).fill("")),
+          task: Array(rolloutsPerExample)
+            .fill(null)
+            .flatMap(() => inputs.task || Array(n).fill("default")),
+          info: Array(rolloutsPerExample)
+            .fill(null)
+            .flatMap(() => inputs.info || Array(n).fill({})),
+          example_id: Array(rolloutsPerExample)
+            .fill(null)
+            .flatMap((_, rolloutIdx) => {
+              const baseIds: number[] =
+                inputs.example_id ||
+                (inputs.id as number[] | undefined) ||
+                Array.from({ length: n }, (_, i) => i);
+              return baseIds.map((id: number) => id * 1000 + rolloutIdx);
+            }),
+        };
+        return repeated;
+      }
+    }
+    
     return inputs;
   }
 
@@ -334,19 +445,7 @@ export abstract class Environment {
     messageType: MessageType | null = null,
     apiKey?: string,
     baseUrl?: string
-  ): Promise<{
-    id: string;
-    choices: Array<{
-      message?: {
-        role: string;
-        content: string | null;
-        tool_calls?: unknown[];
-      };
-      text?: string;
-    }>;
-    toolCalls?: unknown[];
-    toolResults?: unknown[];
-  }> {
+  ): Promise<ModelResponse> {
     const resolvedMessageType = messageType || this.messageType;
     const resolvedSamplingArgs = { ...this.samplingArgs, ...samplingArgs };
 
