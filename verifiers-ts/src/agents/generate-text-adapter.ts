@@ -268,30 +268,29 @@ export class GenerateTextAdapter extends SingleTurnEnv {
     const serializedStructured =
       structuredOutput !== undefined ? JSON.stringify(structuredOutput) : undefined;
 
-    if (!message || !message.content) {
-      if (!serializedStructured) {
-        return [];
-      }
-      return [
-        {
-          role: "assistant",
-          content: serializedStructured,
-          tool_calls: message?.tool_calls as any,
-        },
-      ] as Messages;
-    }
-
+    // Extract content - prefer structured output, then text content, then empty string
     const assistantContent =
-      message.content ?? serializedStructured ?? "";
+      serializedStructured ?? message?.content ?? "";
+
+    // Check if we have tool calls or tool results - we should always include an assistant message
+    // even if content is empty, as long as there are tool calls or tool results
+    const hasToolCalls = message?.tool_calls && message.tool_calls.length > 0;
+    const hasToolResults = converted.toolResults && converted.toolResults.length > 0;
+
+    // If there's no content and no tool calls/results, return empty array
+    if (!assistantContent && !hasToolCalls && !hasToolResults) {
+      return [];
+    }
 
     const messagesArray: any[] = [
       {
         role: "assistant",
         content: assistantContent,
-        tool_calls: message.tool_calls as any,
+        tool_calls: message?.tool_calls as any,
       },
     ];
 
+    // Add tool results as tool messages
     if (converted.toolResults && converted.toolResults.length > 0) {
       for (const toolResult of converted.toolResults as any[]) {
         messagesArray.push({

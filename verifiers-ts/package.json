@@ -1,6 +1,6 @@
 {
   "name": "verifiers-ts",
-"version": "0.0.1-alpha.17",
+"version": "0.0.1-alpha.18",
   "description": "TypeScript implementation of the verifiers framework for RL environments",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

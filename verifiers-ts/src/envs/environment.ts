@@ -142,22 +142,49 @@ export abstract class Environment {
    */
   protected convertFromAISDKResponse(result: any): ModelResponse {
     // Handle AI SDK 5.0 result structure
-    const text = result.text || "";
+    // According to AI SDK docs, result.text contains the final generated text after all tool calls
+    let text = result.text || "";
     const toolCalls: any[] = [];
     const toolResults: any[] = [];
 
-    // Extract tool calls from steps or final result
-    if (result.steps) {
+    // Extract tool calls and results from steps or final result
+    if (result.steps && Array.isArray(result.steps)) {
+      // According to AI SDK docs, steps contain StepResult objects with:
+      // - text: The generated text in that step
+      // - toolCalls: Tool calls made in that step
+      // - toolResults: Tool results from that step
       for (const step of result.steps) {
-        if (step.toolCalls) {
+        if (step.toolCalls && Array.isArray(step.toolCalls)) {
           toolCalls.push(...step.toolCalls);
         }
-        if (step.toolResults) {
+        if (step.toolResults && Array.isArray(step.toolResults)) {
           toolResults.push(...step.toolResults);
         }
+        // Fallback: If result.text is empty, check last step for text
+        // (result.text should already contain accumulated text, but this is a safety check)
+        if (!text && step.text && typeof step.text === "string") {
+          text = step.text;
+        }
       }
-    } else if (result.toolCalls) {
-      toolCalls.push(...result.toolCalls);
+    }
+    
+    // According to AI SDK docs, result.toolCalls and result.toolResults contain
+    // tool calls/results from the LAST step only. We prefer using steps to get all of them.
+    // But we'll include top-level ones if steps weren't available.
+    if (toolCalls.length === 0 && result.toolCalls) {
+      if (Array.isArray(result.toolCalls)) {
+        toolCalls.push(...result.toolCalls);
+      } else {
+        toolCalls.push(result.toolCalls);
+      }
+    }
+    
+    if (toolResults.length === 0 && result.toolResults) {
+      if (Array.isArray(result.toolResults)) {
+        toolResults.push(...result.toolResults);
+      } else {
+        toolResults.push(result.toolResults);
+      }
     }
 
     // Convert tool calls to OpenAI format
