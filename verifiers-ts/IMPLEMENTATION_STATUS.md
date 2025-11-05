@@ -30,11 +30,11 @@
 - [x] Response format conversion (AI SDK ↔ verifiers format)
 - [x] Support for completion format
 
-### Phase 6: Python Bridge ✅
-- [x] Python adapter module (`verifiers_ts_loader.py`)
-- [x] TypeScript environment loading via Node.js
-- [x] Serialization for Environment config
-- [x] Bridge to Python verifiers API (evaluate, rollout)
+### Phase 6: Native TypeScript Evaluation ✅
+- [x] Native TypeScript `vf-eval` CLI implementation
+- [x] Direct TypeScript environment evaluation without Python bridge
+- [x] Compatible result format with Python verifiers
+- [x] Sandbox bridge support (for sandbox environments)
 
 ### Phase 7: Example Environments ✅
 - [x] `example-single-turn`: Basic Q&A environment
@@ -43,9 +43,8 @@
 ## 🔄 In Progress / Known Issues
 
 1. **StatefulToolEnv State Injection**: Current implementation needs refinement to properly pass state through AI SDK tool execution context
-2. **Python Bridge Testing**: Needs testing with actual Node.js environment
-3. **Error Handling**: Some edge cases in error handling need improvement
-4. **Type Safety**: Some `any` types remain - can be refined
+2. **Error Handling**: Some edge cases in error handling need improvement
+3. **Type Safety**: Some `any` types remain - can be refined
 
 ## 📝 Remaining Tasks
 
@@ -74,7 +73,8 @@ The library successfully implements:
 1. **AI SDK Native Integration**: Uses `generateText` with automatic tool calling
 2. **Tool System**: Tools defined with `defineTool()` using Zod schemas, converted to AI SDK tools
 3. **Compatible Results**: Saves in JSONL format compatible with Python `vf-tui`
-4. **Python Bridge**: Allows TypeScript environments to work with `vf-eval` CLI
+4. **Native TypeScript Evaluation**: TypeScript environments use native `vf-eval` CLI (no Python bridge needed)
+5. **Sandbox Bridge**: Python bridge still available for sandbox environments via `sandbox_bridge.py`
 
 ## Key Design Decisions
 

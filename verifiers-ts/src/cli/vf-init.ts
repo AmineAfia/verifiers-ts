@@ -63,6 +63,10 @@ function createPackageJson({ envName, mode }: ScaffoldOptions, pascalName: strin
     types: "./dist/index.d.ts",
     scripts: {
       build: "tsc",
+      dev: "tsc --watch",
+      test: "echo \"no tests yet\"",
+      lint: "echo \"no lint configured\"",
+      format: "echo \"use repo root formatter\"",
       "vf-eval": `node ./node_modules/${CORE_PACKAGE_NAME}/dist/cli/vf-eval.js`
     },
     dependencies: {
@@ -97,7 +101,7 @@ function createTsConfig(): string {
     compilerOptions: {
       target: "ES2022",
       module: "ESNext",
-      moduleResolution: "Node",
+      moduleResolution: "bundler",
       lib: ["ES2022"],
       rootDir: "./src",
       outDir: "./dist",
@@ -105,7 +109,10 @@ function createTsConfig(): string {
       esModuleInterop: true,
       skipLibCheck: true,
       resolveJsonModule: true,
+      isolatedModules: true,
+      allowSyntheticDefaultImports: true,
       declaration: true,
+      declarationMap: true,
       sourceMap: true,
       types: ["node"]
     },

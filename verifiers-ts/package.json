@@ -1,6 +1,6 @@
 {
   "name": "verifiers-ts",
-"version": "0.0.1-alpha.0",
+"version": "0.0.1-alpha.13",
   "description": "TypeScript implementation of the verifiers framework for RL environments",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -14,12 +14,13 @@
 "bin": {
     "vf-eval": "./dist/cli/vf-eval.js",
     "vf-init": "./dist/cli/vf-init.js",
-    "vf-doctor": "./dist/cli/vf-doctor.js"
+    "vf-doctor": "./dist/cli/vf-doctor.js",
+    "vf-tui": "./dist/cli/vf-tui.js"
 },
 "exports": {
     ".": {
-        "import": "./dist/index.js",
-        "types": "./dist/index.d.ts"
+    "import": "./dist/index.js",
+    "types": "./dist/index.d.ts"
     }
 },
   "scripts": {
@@ -46,14 +47,19 @@
   "dependencies": {
     "@ai-sdk/openai": "^2.0.59",
     "ai": "^5.0.0",
+    "ink": "^4.4.1",
+    "ink-select-input": "^5.0.0",
+    "react": "^18.3.1",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
+    "@types/react": "^18.3.26",
     "@typescript-eslint/eslint-plugin": "^6.19.0",
     "@typescript-eslint/parser": "^6.19.0",
     "eslint": "^8.56.0",
     "prettier": "^3.2.4",
+    "turbo": "^2.0.0",
     "typescript": "^5.3.3"
   }
 }

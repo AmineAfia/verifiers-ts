@@ -1,11 +1,6 @@
 """
-Python bridge for TypeScript verifiers environments
+Python bridge for sandbox environments
 """
 
-from .verifiers_ts_loader import load_environment, load_ts_environment
-
-__all__ = ["load_environment", "load_ts_environment"]
-
-
-
-
+# sandbox_bridge.py provides Prime Intellect sandbox integration
+__all__ = []

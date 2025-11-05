@@ -6,7 +6,10 @@
     "types": "./dist/index.d.ts",
     "scripts": {
         "build": "tsc",
+        "dev": "tsc --watch",
         "test": "node --loader tsx src/test.ts",
+        "lint": "echo \"no lint configured\"",
+        "format": "echo \"use repo root formatter\"",
         "vf-eval": "node ./node_modules/verifiers-ts/dist/cli/vf-eval.js"
     },
     "dependencies": {

@@ -23,11 +23,18 @@ Make sure you have access to an AI SDK compatible model (e.g., OpenAI via `@ai-s
 
 ```bash
 cd verifiers-ts/environments/hangman
+# First, ensure verifiers-ts is built (from repo root)
+cd ../..
+pnpm build
+
+# Then install and build the environment
+cd environments/hangman
 pnpm install
 pnpm build          # compiles the TypeScript sources
+pnpm vf-eval -- -n 5 -r 1 -m gpt-5-mini -s
 ```
 
-These commands produce the compiled JS under `dist/`; the `vf-eval` CLI bootstraps its own Python environment on demand.
+**Note:** The environment uses a file dependency (`file:../..`) to reference the local `verifiers-ts` package. Make sure `verifiers-ts` is built (produces `dist/`) before building the environment, as TypeScript will resolve types from the compiled output.
 
 ---
 
