@@ -28,7 +28,6 @@ pnpm build          # compiles the TypeScript sources
 pnpm vf-eval -- -n 5 -r 1 -m gpt-5-mini -s
 ```
 
-**Note:** The environment uses a file dependency (`file:../..`) to reference the local `verifiers-ts` package. Make sure `verifiers-ts` is built (produces `dist/`) before building the environment, as TypeScript will resolve types from the compiled output.
 
 ---
 
