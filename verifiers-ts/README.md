@@ -1,6 +1,6 @@
 # verifiers-ts
 
-TypeScript implementation of the verifiers framework for building RL environments and evaluations with AI SDK integration.
+TypeScript implementation of the verifiers framework by Prime Intellect to build RL environments and evaluations with AI SDK integration.
 
 ## Overview
 

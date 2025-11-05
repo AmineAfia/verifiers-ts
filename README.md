@@ -1,6 +1,6 @@
 # verifiers-ts
 
-Build reinforcement learning environments for language models with TypeScript. Evaluate and train AI agents through interactive tasks, tool use, and multi-turn conversations.
+Build reinforcement learning environments to train LLMs using TypeScript. The library is a fork from the Prime Intellect verifiers library to evaluate and train AI agents through interactive tasks, tool use, and multi-turn conversations.
 
 ## What is verifiers-ts?
 
